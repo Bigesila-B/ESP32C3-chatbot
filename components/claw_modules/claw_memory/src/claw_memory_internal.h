@@ -33,6 +33,28 @@
 #define CLAW_MEMORY_IDENTITY_FILE                "identity.md"
 #define CLAW_MEMORY_USER_FILE                    "user.md"
 #define CLAW_MEMORY_AUTO_EXTRACT_MAX_ITEMS       3
+
+/*
+ * 上下文压缩策略：按模型上下文窗口占用触发 + LLM 摘要
+ * -------------------------------------------------------------------------
+ * 原实现只在会话文件超过 150KB 时压缩，且压缩时无条件保留全部
+ * user / assistant 文本记录，导致纯文本对话永远不会真正缩小，
+ * 最终触发 .blocked 锁死整个会话。
+ *
+ * 这里改为两层触发：
+ *   1) 软阈值：估算 token 达到模型上下文窗口的 CTX_TRIGGER_PERCENT
+ *   2) 硬上限：文件仍保留 150KB 兜底，防止 FAT 分区被写爆
+ * 压缩时丢弃窗口外的早期轮次，并在丢弃前尝试用 LLM 压成摘要持久化，
+ * 摘要会在后续请求中注入，保证记忆不断层。
+ */
+#define CLAW_MEMORY_CTX_WINDOW_DEFAULT      32768U  /* 未识别模型时的兜底窗口 */
+#define CLAW_MEMORY_CTX_TRIGGER_PERCENT     60U     /* 达到窗口的 60% 即触发压缩 */
+#define CLAW_MEMORY_SUMMARY_KEEP_RECENT     6U      /* 压缩后保留最近 N 轮原文 */
+#define CLAW_MEMORY_SUMMARY_MAX_CHARS       2048U   /* 摘要正文最大字符数 */
+#define CLAW_MEMORY_SUMMARY_INPUT_MAX_CHARS 6000U   /* 送入摘要的原始文本上限 */
+#define CLAW_MEMORY_AVG_BYTES_PER_TOKEN     3U      /* UTF-8 中文为主的粗估系数 */
+#define CLAW_MEMORY_LLM_MODEL_MAX           64      /* 模型名字段长度 */
+
 typedef enum {
     CLAW_MEMORY_BACKEND_FORMAT_UNKNOWN = 0,
     CLAW_MEMORY_BACKEND_FORMAT_OPENAI = 1,
@@ -53,6 +75,10 @@ typedef struct {
     size_t max_message_chars;
     uint32_t max_tool_iterations;
     claw_memory_backend_format_t backend_format;
+    /* 当前配置的模型名，用于自动匹配上下文窗口大小 */
+    char llm_model[CLAW_MEMORY_LLM_MODEL_MAX];
+    /* 用户显式指定的上下文窗口（token）。0 表示按 llm_model 自动匹配 */
+    uint32_t context_window_tokens;
     uint32_t write_changes_since_compact;
     uint32_t next_memory_seq;
 } claw_memory_state_t;

@@ -40,6 +40,8 @@ typedef struct {
 #define APP_DEFAULT_LLM_AUTH_TYPE            ""
 #define APP_DEFAULT_LLM_TIMEOUT_MS           "120000"
 #define APP_DEFAULT_LLM_MAX_TOKENS           "8192"
+/* 0 表示按模型名自动匹配上下文窗口大小 */
+#define APP_DEFAULT_LLM_CONTEXT_WINDOW       "0"
 #define APP_DEFAULT_LLM_DEFAULT_IMAGE_MAX_BYTES "524288"
 #define APP_DEFAULT_LLM_MAX_TOKENS_FIELD     ""
 #define APP_DEFAULT_LLM_SUPPORTS_TOOLS       "false"
@@ -75,6 +77,7 @@ static const app_config_field_t s_fields[] = {
     APP_CONFIG_FIELD(llm_auth_type, "llm_auth_type", APP_DEFAULT_LLM_AUTH_TYPE),
     APP_CONFIG_FIELD(llm_timeout_ms, "llm_timeout_ms", APP_DEFAULT_LLM_TIMEOUT_MS),
     APP_CONFIG_FIELD(llm_max_tokens, "llm_max_tokens", APP_DEFAULT_LLM_MAX_TOKENS),
+    APP_CONFIG_FIELD(llm_context_window, "llm_ctx_window", APP_DEFAULT_LLM_CONTEXT_WINDOW),
     APP_CONFIG_FIELD(llm_default_image_max_bytes, "llm_img_max_b", APP_DEFAULT_LLM_DEFAULT_IMAGE_MAX_BYTES),
     APP_CONFIG_FIELD(llm_max_tokens_field, "llm_max_toks_f", APP_DEFAULT_LLM_MAX_TOKENS_FIELD),
     APP_CONFIG_FIELD(llm_supports_tools, "llm_sup_tools", APP_DEFAULT_LLM_SUPPORTS_TOOLS),
@@ -560,6 +563,7 @@ void app_config_to_claw(const app_config_t *config, app_claw_config_t *out)
     strlcpy(out->llm_auth_type, config->llm_auth_type, sizeof(out->llm_auth_type));
     strlcpy(out->llm_timeout_ms, config->llm_timeout_ms, sizeof(out->llm_timeout_ms));
     strlcpy(out->llm_max_tokens, config->llm_max_tokens, sizeof(out->llm_max_tokens));
+    strlcpy(out->llm_context_window, config->llm_context_window, sizeof(out->llm_context_window));
     strlcpy(out->llm_default_image_max_bytes,
             config->llm_default_image_max_bytes,
             sizeof(out->llm_default_image_max_bytes));

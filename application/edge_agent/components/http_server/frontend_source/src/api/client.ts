@@ -17,6 +17,7 @@ export type AppConfig = {
   llm_auth_type: string;
   llm_timeout_ms: string;
   llm_max_tokens: string;
+  llm_context_window: string;
   llm_default_image_max_bytes: string;
   llm_max_tokens_field: string;
   llm_supports_tools: string;
@@ -55,6 +56,7 @@ export const GROUP_FIELDS: Record<ConfigGroup, (keyof AppConfig)[]> = {
     'llm_auth_type',
     'llm_timeout_ms',
     'llm_max_tokens',
+    'llm_context_window',
     'llm_default_image_max_bytes',
     'llm_max_tokens_field',
     'llm_supports_tools',

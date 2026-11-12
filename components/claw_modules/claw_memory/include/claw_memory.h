@@ -36,6 +36,8 @@ typedef struct {
     const char *memory_root_dir;
     size_t max_message_chars;
     uint32_t max_tool_iterations;
+    /* 模型上下文窗口（token）。0 表示按 llm.model 自动匹配 */
+    size_t context_window_tokens;
     claw_memory_llm_config_t llm;
     bool enable_async_extract_stage_note;
 } claw_memory_config_t;

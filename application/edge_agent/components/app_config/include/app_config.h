@@ -32,6 +32,8 @@ typedef struct {
     char llm_auth_type[32];
     char llm_timeout_ms[16];
     char llm_max_tokens[16];
+    /* 模型上下文窗口（token）。"0" 或空表示按模型名自动匹配 */
+    char llm_context_window[16];
     char llm_default_image_max_bytes[16];
     char llm_max_tokens_field[32];
     char llm_supports_tools[8];

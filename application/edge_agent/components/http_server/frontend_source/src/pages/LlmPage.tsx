@@ -404,6 +404,13 @@ export const LlmPage: Component = () => {
                 value={tab.form.llm_max_tokens}
                 onInput={(event) => tab.setForm('llm_max_tokens', event.currentTarget.value)}
               />
+              <TextInput
+                label={t('llmContextWindow') as string}
+                placeholder={t('llmContextWindowPlaceholder') as string}
+                hint={t('llmContextWindowHelp') as string}
+                value={tab.form.llm_context_window}
+                onInput={(event) => tab.setForm('llm_context_window', event.currentTarget.value)}
+              />
             </div>
           </div>
         </StaticConfigBlock>

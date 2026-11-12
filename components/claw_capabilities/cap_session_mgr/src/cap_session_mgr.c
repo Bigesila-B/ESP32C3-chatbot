@@ -437,12 +437,30 @@ static esp_err_t cap_session_mgr_session_execute(const char *input_json,
                                                  size_t output_size)
 {
     char command_text[96];
+    const char *effective_command = command_text;
     cap_session_mgr_parsed_command_t parsed;
     esp_err_t err;
 
     err = cap_session_mgr_read_command_input(input_json, command_text, sizeof(command_text));
+    if (err == ESP_OK) {
+        /* 命令前缀归一化：同时接受完整写法与简写。
+         * 官方 FAQ 让用户发 "/new"，但解析器只认裸子命令，这里补齐映射：
+         *   "/session new" -> "new"
+         *   "/new"         -> "new"
+         *   "/list"        -> "list"
+         * 裸词（如 "new"）保持原样，兼容既有调用方。 */
+        if (strncmp(command_text, "/session ", 9) == 0) {
+            effective_command = command_text + 9;
+        } else if (strncmp(command_text, "/session", 8) == 0 && command_text[8] == '\0') {
+            effective_command = "";
+        } else if (strcmp(command_text, "/new") == 0) {
+            effective_command = "new";
+        } else if (strcmp(command_text, "/list") == 0) {
+            effective_command = "list";
+        }
+    }
     if (err != ESP_OK ||
-            cap_session_mgr_parse_session_command(command_text, &parsed) != ESP_OK) {
+            cap_session_mgr_parse_session_command(effective_command, &parsed) != ESP_OK) {
         cap_session_mgr_write_message(output, output_size, s_session_mgr_usage);
         return ESP_OK;
     }

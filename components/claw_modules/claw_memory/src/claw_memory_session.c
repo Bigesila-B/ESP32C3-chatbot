@@ -1526,22 +1526,267 @@ static esp_err_t session_history_analyze_turns(const claw_memory_session_index_t
     return ESP_OK;
 }
 
+/* ==========================================================================
+ * 上下文压缩：按模型上下文窗口占用触发，并用 LLM 摘要保留早期要点
+ * ========================================================================== */
+
+/* 当前压缩保留的最近轮数，由 session_history_compact_if_needed() 设置。
+ * 之所以用文件级静态变量而不给 plan/rewrite 增加参数，是为了把改动面
+ * 收敛到最小：plan_compaction() 与 rewrite_compacted() 都通过
+ * session_history_compact_keep_record() 读取该值，无需修改函数签名。 */
+static size_t s_compact_keep_recent = CLAW_MEMORY_SUMMARY_KEEP_RECENT;
+
+/* 按模型名匹配上下文窗口大小，匹配不到时回落到默认值。
+ * 固件无法从 API 获取真实窗口，只能按模型家族做保守估计。 */
+static uint32_t session_history_context_window_for_model(const char *model)
+{
+    static const struct {
+        const char *prefix;
+        uint32_t window;
+    } table[] = {
+        { "gpt-4.1",   1047576U },
+        { "gpt-5",      400000U },
+        { "gpt-4o",     128000U },
+        { "o1",         200000U },
+        { "o3",         200000U },
+        { "claude",     200000U },
+        { "gemini",    1048576U },
+        { "deepseek",    65536U },
+        { "qwen",       131072U },
+        { "glm",        131072U },
+        { "kimi",       131072U },
+        { "moonshot",   131072U },
+        { "doubao",     131072U },
+        { "ernie",      131072U },
+        { "hunyuan",    131072U },
+        { "minimax",    245760U },
+        { "llama",      131072U },
+    };
+    size_t i;
+
+    if (!model || !model[0]) {
+        return CLAW_MEMORY_CTX_WINDOW_DEFAULT;
+    }
+    for (i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
+        if (text_contains_ascii_ci(model, table[i].prefix)) {
+            return table[i].window;
+        }
+    }
+    return CLAW_MEMORY_CTX_WINDOW_DEFAULT;
+}
+
+/* 把会话文件字节数粗估成 token 数。
+ * 中文为主的 UTF-8 约 3 字节/字，叠加 JSON 结构开销后整体约 3 字节/token，
+ * 误差约 ±30%，对“是否接近窗口上限”这类判断已经够用。 */
+static size_t session_history_estimate_tokens(size_t bytes)
+{
+    if (CLAW_MEMORY_AVG_BYTES_PER_TOKEN == 0) {
+        return bytes;
+    }
+    return bytes / CLAW_MEMORY_AVG_BYTES_PER_TOKEN;
+}
+
+/* 摘要文件放在会话数据文件旁边：xxx.jsonl -> xxx.jsonl.summary.txt */
+static char *session_history_summary_path_dup(const char *data_path)
+{
+    size_t len;
+    char *path;
+
+    if (!data_path) {
+        return NULL;
+    }
+    len = strlen(data_path);
+    path = calloc(1, len + sizeof(".summary.txt"));
+    if (!path) {
+        return NULL;
+    }
+    memcpy(path, data_path, len);
+    memcpy(path + len, ".summary.txt", sizeof(".summary.txt"));
+    return path;
+}
+
+static char *session_history_summary_path_for_session(const char *session_id)
+{
+    char *data_path = claw_memory_session_path_dup(session_id);
+    char *summary_path;
+
+    if (!data_path) {
+        return NULL;
+    }
+    summary_path = session_history_summary_path_dup(data_path);
+    free(data_path);
+    return summary_path;
+}
+
+static esp_err_t session_history_save_summary(const char *data_path, const char *summary)
+{
+    char *path = session_history_summary_path_dup(data_path);
+    esp_err_t err;
+
+    if (!path) {
+        return ESP_ERR_NO_MEM;
+    }
+    err = write_file_text(path, summary);
+    free(path);
+    return err;
+}
+
+/* 把 [0, keep_from) 范围内的记录文本交给 LLM 压成摘要。
+ * 成功返回堆上的摘要文本（调用者负责 free）；任何失败都返回 NULL，
+ * 调用方据此回退到纯丢弃路径，保证压缩本身永远不会阻塞会话。 */
+static char *session_history_generate_summary(const char *data_path,
+                                              const claw_memory_session_index_t *index,
+                                              size_t keep_from)
+{
+    claw_llm_response_t response = {0};
+    cJSON *messages = NULL;
+    cJSON *user_msg = NULL;
+    char *old_text = NULL;
+    char *summary = NULL;
+    char *err_msg = NULL;
+    size_t used = 0;
+    size_t i;
+    esp_err_t err;
+    FILE *fp;
+
+    if (!data_path || !index || keep_from == 0) {
+        return NULL;
+    }
+    /* 没有可用的 LLM 运行时，直接放弃摘要并走回退路径 */
+    if (!s_async_extract.runtime) {
+        ESP_LOGW(TAG, "no llm runtime available, skip session summary");
+        return NULL;
+    }
+
+    old_text = calloc(1, CLAW_MEMORY_SUMMARY_INPUT_MAX_CHARS + 1);
+    if (!old_text) {
+        return NULL;
+    }
+
+    fp = fopen(data_path, "r");
+    if (!fp) {
+        free(old_text);
+        return NULL;
+    }
+
+    for (i = 0; i < keep_from && i < index->count; i++) {
+        char record[1024];
+        cJSON *item;
+        cJSON *text_item;
+        size_t n;
+        int wrote;
+
+        if (used >= CLAW_MEMORY_SUMMARY_INPUT_MAX_CHARS) {
+            break;
+        }
+        if (fseek(fp, (long)index->entries[i].offset, SEEK_SET) != 0) {
+            continue;
+        }
+        n = fread(record, 1, sizeof(record) - 1, fp);
+        record[n] = '\0';
+
+        item = cJSON_Parse(record);
+        if (!item) {
+            continue;
+        }
+        text_item = cJSON_GetObjectItemCaseSensitive(item, "text");
+        if (cJSON_IsString(text_item) && text_item->valuestring && text_item->valuestring[0]) {
+            wrote = snprintf(old_text + used,
+                             CLAW_MEMORY_SUMMARY_INPUT_MAX_CHARS - used + 1,
+                             "- %s\n",
+                             text_item->valuestring);
+            if (wrote > 0) {
+                used += (size_t)wrote;
+                if (used > CLAW_MEMORY_SUMMARY_INPUT_MAX_CHARS) {
+                    used = CLAW_MEMORY_SUMMARY_INPUT_MAX_CHARS;
+                }
+            }
+        }
+        cJSON_Delete(item);
+    }
+    fclose(fp);
+
+    if (used == 0) {
+        free(old_text);
+        return NULL;
+    }
+
+    messages = cJSON_CreateArray();
+    user_msg = cJSON_CreateObject();
+    if (!messages || !user_msg) {
+        cJSON_Delete(messages);
+        cJSON_Delete(user_msg);
+        free(old_text);
+        return NULL;
+    }
+    cJSON_AddStringToObject(user_msg, "role", "user");
+    cJSON_AddStringToObject(user_msg, "content", old_text);
+    cJSON_AddItemToArray(messages, user_msg);
+    free(old_text);
+
+    err = claw_llm_runtime_chat(s_async_extract.runtime,
+                                &(claw_llm_chat_request_t) {
+                                    .system_prompt =
+                                    "You compress chat history for an embedded agent.\n"
+                                    "Return concise markdown with sections: Stable Facts, "
+                                    "User Preferences, Decisions, Open Tasks.\n"
+                                    "Keep only durable information, drop chatter, never fabricate.",
+                                    .messages = messages,
+                                    .tools_json = NULL,
+                                },
+                                &response,
+                                &err_msg);
+    cJSON_Delete(messages);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG,
+                 "session summary llm call failed: %s",
+                 err_msg ? err_msg : esp_err_to_name(err));
+        free(err_msg);
+        claw_llm_response_free(&response);
+        return NULL;
+    }
+    free(err_msg);
+
+    if (response.text && response.text[0]) {
+        size_t len = strlen(response.text);
+
+        if (len > CLAW_MEMORY_SUMMARY_MAX_CHARS) {
+            len = CLAW_MEMORY_SUMMARY_MAX_CHARS;
+        }
+        summary = calloc(1, len + 1);
+        if (summary) {
+            memcpy(summary, response.text, len);
+        }
+    }
+    claw_llm_response_free(&response);
+    return summary;
+}
+
 static bool session_history_compact_keep_record(const claw_memory_session_turn_t *turns,
                                                 size_t turn_count,
                                                 size_t turn_index,
                                                 claw_core_context_record_type_t type)
 {
+    bool in_recent_window;
+
     if (!turns || turn_index >= turn_count) {
         return false;
     }
+
+    /* 只保留最近 N 轮：更早的文本轮次已由 LLM 摘要覆盖，可以安全丢弃。
+     * 原实现无条件保留全部 user/assistant 文本，导致压缩后体积几乎不下降，
+     * 这是纯文本对话最终被 .blocked 锁死的根本原因。 */
+    in_recent_window = (turn_count - turn_index) <= s_compact_keep_recent;
+
     if (type == CLAW_CORE_CONTEXT_RECORD_USER ||
             type == CLAW_CORE_CONTEXT_RECORD_ASSISTANT_FINAL) {
-        return true;
+        return in_recent_window;
     }
+    /* 未完成的当前轮次必须完整保留，否则会破坏 tool_call 与 tool_result 的对应关系 */
     if (turn_index + 1 == turn_count && !turns[turn_index].completed) {
         return true;
     }
-    return turns[turn_index].keep_tool_records &&
+    return in_recent_window && turns[turn_index].keep_tool_records &&
            (type == CLAW_CORE_CONTEXT_RECORD_ASSISTANT_TOOL ||
             type == CLAW_CORE_CONTEXT_RECORD_TOOL_RESULT);
 }
@@ -1781,14 +2026,40 @@ static esp_err_t session_history_compact_if_needed(const char *session_id,
                                                    const char *idx_path)
 {
     claw_memory_session_index_t index = {0};
+    size_t data_size;
+    size_t estimated_tokens;
+    size_t trigger_tokens;
+    uint32_t window;
+    size_t keep;
     esp_err_t err;
 
     if (!session_id || !data_path || !idx_path) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (file_size_bytes(data_path) <= CLAW_MEMORY_SESSION_SIZE_LIMIT) {
+
+    data_size = file_size_bytes(data_path);
+
+    /* 第一层：软阈值 —— 估算 token 达到模型上下文窗口的指定比例即压缩。
+     * 窗口优先取用户显式配置，未配置（0）时按模型名自动匹配。 */
+    window = s_memory.context_window_tokens > 0
+             ? s_memory.context_window_tokens
+             : session_history_context_window_for_model(s_memory.llm_model);
+    trigger_tokens = (size_t)window * CLAW_MEMORY_CTX_TRIGGER_PERCENT / 100U;
+    estimated_tokens = session_history_estimate_tokens(data_size);
+
+    /* 第二层：150KB 文件硬上限兜底，防止 FAT 分区被写爆 */
+    if (data_size <= CLAW_MEMORY_SESSION_SIZE_LIMIT &&
+            (trigger_tokens == 0 || estimated_tokens < trigger_tokens)) {
         return ESP_OK;
     }
+
+    ESP_LOGI(TAG,
+             "session compact trigger session=%s bytes=%u est_tokens=%u window=%u model=%s",
+             session_id,
+             (unsigned)data_size,
+             (unsigned)estimated_tokens,
+             (unsigned)window,
+             s_memory.llm_model[0] ? s_memory.llm_model : "(default)");
 
     err = session_history_validate_pair(data_path, idx_path, &index);
     if (err != ESP_OK) {
@@ -1796,7 +2067,65 @@ static esp_err_t session_history_compact_if_needed(const char *session_id,
         return session_history_recreate_file(data_path, idx_path);
     }
 
+    /* 逐步收缩保留轮数，确保压缩结果能落回硬上限以下。
+     * 若保留 1 轮仍然超限，说明单轮内容本身过大，交由原有 blocked 逻辑处理。 */
+    s_compact_keep_recent = CLAW_MEMORY_SUMMARY_KEEP_RECENT;
+    for (keep = CLAW_MEMORY_SUMMARY_KEEP_RECENT; keep > 0; keep--) {
+        claw_memory_session_turn_t *turns = NULL;
+        size_t turn_count = 0;
+        size_t planned_size = 0;
+        size_t planned_count = 0;
+
+        s_compact_keep_recent = keep;
+        if (session_history_analyze_turns(&index, &turns, &turn_count) != ESP_OK) {
+            break;
+        }
+        err = session_history_plan_compaction(&index, turns, turn_count,
+                                              &planned_size, &planned_count);
+        free(turns);
+        if (err == ESP_OK && planned_size <= CLAW_MEMORY_SESSION_SIZE_LIMIT) {
+            break;
+        }
+        if (keep == 1) {
+            break;
+        }
+    }
+    if (keep == 0) {
+        s_compact_keep_recent = 1;
+    }
+
+    /* 丢弃之前先把窗口外的早期内容压成摘要并落盘。
+     * 摘要失败不影响压缩本身，只是记忆会断层，绝不会阻塞会话。 */
+    {
+        claw_memory_session_turn_t *turns = NULL;
+        size_t turn_count = 0;
+        size_t keep_from = 0;
+
+        if (session_history_analyze_turns(&index, &turns, &turn_count) == ESP_OK) {
+            if (turn_count > s_compact_keep_recent) {
+                keep_from = turns[turn_count - s_compact_keep_recent].start;
+            }
+            free(turns);
+        }
+        if (keep_from > 0) {
+            char *summary = session_history_generate_summary(data_path, &index, keep_from);
+
+            if (summary) {
+                if (session_history_save_summary(data_path, summary) != ESP_OK) {
+                    ESP_LOGW(TAG, "save session summary failed session=%s", session_id);
+                } else {
+                    ESP_LOGI(TAG,
+                             "session summary saved session=%s chars=%u",
+                             session_id,
+                             (unsigned)strlen(summary));
+                }
+                free(summary);
+            }
+        }
+    }
+
     err = session_history_rewrite_compacted(session_id, request, data_path, idx_path, &index);
+    s_compact_keep_recent = CLAW_MEMORY_SUMMARY_KEEP_RECENT;
     session_history_index_free(&index);
     return err;
 }
@@ -2061,6 +2390,8 @@ static esp_err_t claw_memory_session_history_collect(const claw_core_request_t *
                                                      void *user_ctx)
 {
     char *content = NULL;
+    char *summary = NULL;
+    char *summary_path = NULL;
     esp_err_t err;
 
     (void)user_ctx;
@@ -2079,6 +2410,44 @@ static esp_err_t claw_memory_session_history_collect(const claw_core_request_t *
         free(content);
         return ESP_ERR_NOT_FOUND;
     }
+
+    /* 把上一次压缩生成的摘要插到历史最前面，
+     * 让模型知道窗口外发生过什么，避免压缩之后记忆断层。 */
+    summary_path = session_history_summary_path_for_session(request->session_id);
+    if (summary_path && read_file_dup(summary_path, &summary) == ESP_OK &&
+            summary && summary[0]) {
+        cJSON *messages = cJSON_Parse(content);
+        cJSON *user_msg = cJSON_CreateObject();
+        cJSON *assistant_msg = cJSON_CreateObject();
+        char *prefixed = NULL;
+        char *rebuilt = NULL;
+
+        if (messages && cJSON_IsArray(messages) && user_msg && assistant_msg) {
+            prefixed = dup_printf("[Earlier conversation summary]\n%s", summary);
+            cJSON_AddStringToObject(user_msg, "role", "user");
+            cJSON_AddStringToObject(user_msg, "content", prefixed ? prefixed : summary);
+            cJSON_AddStringToObject(assistant_msg, "role", "assistant");
+            cJSON_AddStringToObject(assistant_msg, "content",
+                                    "Understood. I will continue from that summarized context.");
+
+            /* 顺序要求：摘要 user -> 确认 assistant -> 原始历史 */
+            cJSON_InsertItemInArray(messages, 0, user_msg);
+            cJSON_InsertItemInArray(messages, 1, assistant_msg);
+
+            rebuilt = cJSON_PrintUnformatted(messages);
+            if (rebuilt) {
+                free(content);
+                content = rebuilt;
+            }
+        } else {
+            cJSON_Delete(user_msg);
+            cJSON_Delete(assistant_msg);
+        }
+        free(prefixed);
+        cJSON_Delete(messages);
+    }
+    free(summary);
+    free(summary_path);
 
     out_context->kind = CLAW_CORE_CONTEXT_KIND_MESSAGES;
     out_context->content = content;

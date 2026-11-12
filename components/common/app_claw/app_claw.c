@@ -538,6 +538,8 @@ static esp_err_t init_memory(const app_claw_config_t *config,
         .memory_root_dir = paths->memory_root_dir,
         .max_message_chars = 4096,
         .max_tool_iterations = max_tool_iterations,
+        /* 0 表示按 llm_model 自动匹配；非 0 时由用户在 Web 设置页指定 */
+        .context_window_tokens = (size_t)strtoul(config->llm_context_window, NULL, 10),
         .llm = {
             .api_key = config->llm_api_key,
             .backend_type = config->llm_backend_type,

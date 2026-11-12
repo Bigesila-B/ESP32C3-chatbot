@@ -49,6 +49,7 @@ static const config_field_def_t CONFIG_FIELDS[] = {
     CONFIG_FIELD("llm",          llm_auth_type),
     CONFIG_FIELD("llm",          llm_timeout_ms),
     CONFIG_FIELD("llm",          llm_max_tokens),
+    CONFIG_FIELD("llm",          llm_context_window),
     CONFIG_FIELD("llm",          llm_default_image_max_bytes),
     CONFIG_FIELD("llm",          llm_max_tokens_field),
     CONFIG_FIELD("llm",          llm_supports_tools),
