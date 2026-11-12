@@ -1,3 +1,27 @@
+> [!IMPORTANT]
+> ## 这是 ESP-Claw 的个人优化分支 / Personal optimization fork
+>
+> **上游 / Upstream**: [espressif/esp-claw](https://github.com/espressif/esp-claw) @ `a4edfe5` (2026-07-28)
+> **定制分支 / Custom branch**: `feature/context-compaction`
+>
+> 本项目在官方固件基础上叠加**局部、低耦合**的优化，并刻意保持能低成本跟进官方新版：
+> `master` 只跟踪官方、永不提交本地改动；所有定制功能集中在 `feature/*` 分支，通过 rebase 迁移。
+>
+> This fork keeps upstream code pristine and syncable. All customizations live in
+> `feature/*` branches and are rebased onto new upstream releases.
+>
+> **开发方向 / 分支策略 / 同步与迁移流程 / 改动锚点：[FORK_GUIDE.md](./FORK_GUIDE.md)**
+>
+> ### 当前定制功能
+>
+> | 功能 | 说明 |
+> |---|---|
+> | 上下文压缩重做 | 按模型上下文窗口触发（默认 60%），保留最近 6 轮，丢弃前用 LLM 生成摘要并注入后续请求；替代原版"只看 150KB 文件大小、且只丢工具记录"的实现 |
+> | WebUI 窗口配置 | LLM 设置页新增「上下文窗口 (token)」，留空或 0 表示按模型名自动匹配 |
+> | `/new` 别名 | `/new`、`/list` 等效 `/session new`、`/session list` |
+>
+> ---
+
 <div align="center">
 
   <a href="https://esp-claw.com/en/">
