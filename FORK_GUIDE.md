@@ -1,7 +1,6 @@
 # 开发方向与维护指南
 
-本文说明这个 fork 的**定位、分支策略、当前定制功能、以及如何同步官方更新**。
-如果你是一个 agent 或协作者，读完这篇就能理解项目意图，不必先读源码。
+本文记录定制分支的维护与迁移入口。功能对比、设置方法和 ESP32-S3 实测范围见[定制版使用说明](./docs/src/content/docs/zh-cn/reference-project/fork-edition.mdx)。
 
 ---
 
@@ -36,15 +35,15 @@ upstream  espressif/esp-claw
               ▼
 master  ──────────────────────────►  始终等于官方最新，不加任何本地提交
               │
-              │  rebase（迁移定制功能）
+              │  cherry-pick（在验证分支迁移定制功能）
               ▼
-feature/context-compaction  ──────►  定制功能分支，设备实际烧录的版本
+feature/context-compaction  ──────►  GitHub 默认分支，发布定制版
 ```
 
 | 分支 | 作用 | 规则 |
 |---|---|---|
 | `master` | 跟踪官方最新 | **只允许快进合并，禁止直接提交** |
-| `feature/context-compaction` | 当前定制功能集合 | 基于上游某个基线，rebase 到新 master 来升级 |
+| `feature/context-compaction` | 当前定制功能集合 | 从官方新版建验证分支，迁移仍需要的提交，实测后发布 |
 
 `master` 一旦混入本地提交，就无法快进合并官方更新，整个模型就崩了。**这是最重要的一条纪律。**
 
@@ -130,10 +129,9 @@ pnpm install
 pnpm run build
 ```
 
-### 3.3 `/new` 命令别名
+### 3.3 会话工具的指令归一化
 
-**解决的问题**：官方 FAQ 让用户发 `/new`，但解析器只认裸子命令 `new`，
-实际必须发 `/session new`。
+聊天路由使用 `/session new` 和 `/session list`。会话工具内部兼容带斜杠的命令参数。
 
 | 文件 | 改动 |
 |---|---|
@@ -171,6 +169,16 @@ pnpm run build
 
 会话历史无可读记录且索引重建失败时，`claw_memory_session_load_json_alloc()` 记录错误并允许本轮聊天继续。Skill 和 Web 上传检查 `fclose()` 的结果，避免缓冲写入失败后误报成功。空的 Skill 会话记录可在有可用空间后重新激活。迁移时保留新版的索引修复流程和 Skill 注册接口，复测磁盘满时的文本回复及恢复后的 Skill 激活。
 
+### 3.7 Web MCP 设置
+
+迁移时核对 `mcp_server_url` 的配置保存和启动传递、`http_server_mcp_api.c` 的连接测试，以及 `cap_mcp_client` 的默认地址和握手接口。复测保存后重启、列出工具、调用工具，以及请求指定地址时的覆盖行为。
+
+### 3.8 可选 MicroPython 与默认路由
+
+`components/claw_capabilities/cap_micropython/` 封装运行时、工具和内置 Skill。移植时核对 `app_claw` 的 Kconfig、组件依赖及注册入口，再测自定义 Skill 激活、同目录导入和超时。MicroPython 要求 ESP32-S3 和 PSRAM，构建后检查应用分区容量。
+
+默认聊天提示曾由 `application/edge_agent/fatfs_image/system/.recovery/router_rules/router_rules.json` 的 `im_any_message_working_reply` 控制。迁移时核对新版规则是否仍含该提示。已有设备的 DATA 路由保留在设备上，处理方式见[定制版使用说明](./docs/src/content/docs/zh-cn/reference-project/fork-edition.mdx)。
+
 ## 4. 同步官方更新
 
 ### 一次性配置
@@ -183,9 +191,10 @@ git remote add upstream https://github.com/espressif/esp-claw.git
 
 ```bash
 git fetch upstream
+git fetch origin
 git worktree add -b upgrade/esp-claw ../esp-claw-upgrade upstream/master
 cd ../esp-claw-upgrade
-git log --oneline --reverse upstream/master..local/chat-help
+git log --oneline --reverse upstream/master..origin/feature/context-compaction
 ```
 
 用 `git cherry-pick <提交>` 按顺序迁移仍需要的本地功能。根据第 3 节核对新版入口，重新构建前端和固件，再用测试设备验证。原有工作区和分支仍可用于回退。
@@ -226,9 +235,8 @@ git log -20 upstream/master --oneline -- components/claw_modules/claw_memory/src
 
 ### 硬件
 
-- ESP32-S3 N16R8（16MB Flash + 8MB PSRAM）
-- 板型配置：`esp32_S3_DevKitC_1_breadboard`
-- 串口：板载 CH343（`VID_1A86:PID_55D3`）
+- 实测硬件为 ESP32-S3 N16R8（16 MiB Flash、8 MiB PSRAM），板型配置为 `esp32_S3_DevKitC_1`。
+- 烧录时使用本机识别到的串口。以下用 `PORT` 表示。
 
 ### 环境
 
@@ -245,9 +253,9 @@ pip install esp-bmgr-assist idf-component-manager
 
 ```bash
 cd application/edge_agent
-idf.py bmgr -c ./boards -b esp32_S3_DevKitC_1_breadboard
+idf.py bmgr -c ./boards -b esp32_S3_DevKitC_1
+idf.py menuconfig
 idf.py build
-idf.py -p COM4 flash
 ```
 
 ### 已知编译陷阱
@@ -264,16 +272,18 @@ idf.py -p COM4 flash
 
 ## 7. 刷机注意事项
 
-烧录 `edge_agent.bin`（`0x20000`）不影响 NVS（`0xA000`），Wi-Fi 和 API Key 会保留。
+首次安装可用 `idf.py -p PORT flash`。已有设备先核对当前分区表和构建目标。分区布局一致时，`idf.py -p PORT app-flash` 仅更新应用分区。需要更新内置 Skills 或恢复默认文件时，同时检查并更新只读 SYSTEM 镜像。
 
-烧录 `system.bin` / `storage.bin` 会**重置文件系统**，会话历史和上传的文件会丢。
+会话、上传文件及用户 Skills 存在可写 DATA。若 DATA 位于 Flash，覆盖其 `storage.bin` 会重置这些数据。更换分区布局或做整机烧录前先备份数据和配置。
 
 完整备份 / 回滚：
 
 ```bash
-python -m esptool --port COM4 --baud 460800 read-flash 0x0 0x1000000 backup.bin
-python -m esptool --port COM4 --baud 460800 write-flash 0x0 backup.bin
+python -m esptool --port PORT --baud 460800 read-flash 0x0 0x1000000 backup.bin
+python -m esptool --port PORT --baud 460800 write-flash 0x0 backup.bin
 ```
+
+示例备份大小对应 16 MiB Flash。完整备份可能含设备凭据，请存放在本机。
 
 ---
 

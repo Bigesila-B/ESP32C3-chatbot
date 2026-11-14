@@ -9,6 +9,8 @@ import LinkToSource from '@/components/LinkToSource.astro';
 
 ## 整体架构
 
+定制分支的功能变化和使用方式见 [ESP-Claw 定制版](@lang/reference-project/fork-edition)。
+
 项目采用 **"应用示例 + 通用组件"** 的组织方式：`application/edge_agent` 是可直接编译运行的 ESP-IDF 示例工程，负责把 Wi-Fi、配置页面、Lua 模块和各类能力组装成一个完整设备；`components` 则沉淀可复用的运行时核心、能力插件和硬件/脚本扩展模块，便于后续在不同板型和场景下复用。
 
 当前代码可以分为四个部分：
