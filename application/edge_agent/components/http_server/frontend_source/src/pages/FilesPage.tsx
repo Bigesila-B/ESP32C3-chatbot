@@ -19,6 +19,7 @@ import { Banner } from '../components/ui/Banner';
 import { Modal } from '../components/ui/Modal';
 import { markDirty } from '../state/dirty';
 import { pushToast } from '../state/toast';
+import { imageUploadSize, jpegUploadName, prepareImageUpload } from '../utils/imageUpload';
 
 const EDITABLE_EXT = ['.md', '.json', '.txt', '.jsonl', '.jsonc', '.lua', '.log'];
 
@@ -88,6 +89,7 @@ export const FilesPage: Component = () => {
   const [newFolderName, setNewFolderName] = createSignal('');
   let fileInputRef: HTMLInputElement | undefined;
   const [chosenFile, setChosenFile] = createSignal<File | null>(null);
+  const [uploading, setUploading] = createSignal(false);
 
   const [editor, setEditor] = createSignal<EditorState>(initialEditor);
   const [folderDownload, setFolderDownload] = createSignal<FolderDownloadState | null>(null);
@@ -131,6 +133,7 @@ export const FilesPage: Component = () => {
   };
 
   const handleUpload = async () => {
+    if (uploading()) return;
     if (!devMode()) {
       pushToast(t('fileDevModeRequired') as string, 'error');
       return;
@@ -141,16 +144,25 @@ export const FilesPage: Component = () => {
       pushToast(t('fileSelectAndPath') as string, 'error');
       return;
     }
+    setUploading(true);
     try {
-      await uploadFile(target, file);
+      const upload = await prepareImageUpload(file);
+      const lastSlash = target.lastIndexOf('/');
+      const destination = upload === file
+        ? target
+        : target.slice(0, lastSlash + 1) + jpegUploadName(target.slice(lastSlash + 1));
+      await uploadFile(destination, upload);
       setUploadPath('');
       setChosenFile(null);
       setFileChosenName(null);
       if (fileInputRef) fileInputRef.value = '';
-      pushToast(t('fileUploadComplete') as string, 'success');
+      pushToast(upload === file ? t('fileUploadComplete')
+        : tf('uploadImageCompressed', { size: imageUploadSize(upload) }), 'success');
       await loadList();
     } catch (err) {
       pushToast((err as Error).message, 'error');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -395,15 +407,15 @@ export const FilesPage: Component = () => {
                 }
               }}
             />
-            <Button variant="ghost" size="xs" onClick={() => fileInputRef?.click()}>
+            <Button variant="ghost" size="xs" onClick={() => fileInputRef?.click()} disabled={uploading()}>
               {t('fileChoose')}
             </Button>
             <span class="text-[0.82rem] text-[var(--color-text-muted)] flex-1 truncate">
               {fileChosenName() ?? t('fileNoFileSelected')}
             </span>
           </div>
-          <Button size="sm" variant="primary" onClick={handleUpload}>
-            {t('fileUpload')}
+          <Button size="sm" variant="primary" onClick={handleUpload} disabled={uploading()}>
+            {t(uploading() ? 'uploadImagePreparing' : 'fileUpload')}
           </Button>
         </div>
       </Show>

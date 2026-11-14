@@ -453,7 +453,7 @@ export type ChatHelpSnapshot = {
   usage_durable: boolean;
   today: ChatHelpPeriod;
   month: ChatHelpPeriod;
-  commands: Array<{ command: string; description: string; channel: string }>;
+  commands: Array<{ command: string; description: string; description_zh?: string; channel: string }>;
 };
 
 export function fetchChatHelp(signal?: AbortSignal) {

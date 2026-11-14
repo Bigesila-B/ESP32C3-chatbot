@@ -22,9 +22,10 @@ import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { Banner } from '../components/ui/Banner';
 import { Switch } from '../components/ui/Switch';
-import { t } from '../i18n';
+import { t, tf } from '../i18n';
 import { pushToast } from '../state/toast';
 import { ChatHelpMessage } from '../components/webim/ChatHelpMessage';
+import { imageUploadSize, prepareImageUpload } from '../utils/imageUpload';
 
 const LS_CHAT_ID = 'esp-claw-webim-chat-id';
 const MARKED_CDN_URL = 'https://esp-claw.com/clientjs/marked@18.0.4/marked.umd.min.js';
@@ -212,6 +213,7 @@ export const WebImPage: Component = () => {
   const [bound, setBound] = createSignal<boolean | null>(null);
   const [wsReady, setWsReady] = createSignal(false);
   const [sending, setSending] = createSignal(false);
+  const [uploading, setUploading] = createSignal(false);
   const [markdownPreview, setMarkdownPreview] = createSignal(false);
   const [markdownPreviewLoading, setMarkdownPreviewLoading] = createSignal(false);
   let fileRef: HTMLInputElement | undefined;
@@ -364,17 +366,24 @@ export const WebImPage: Component = () => {
   const onPickFile = async (ev: Event) => {
     const inputEl = ev.currentTarget as HTMLInputElement;
     const file = inputEl.files?.[0];
-    if (!file) return;
-    const name = `${Date.now().toString(36)}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-    const path = '/inbox/webim/' + name;
+    inputEl.value = '';
+    if (!file || uploading()) return;
+    setUploading(true);
     try {
-      await uploadFile(path, file);
+      const upload = await prepareImageUpload(file);
+      const name = `${Date.now().toString(36)}_${upload.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+      const path = '/inbox/webim/' + name;
+      await uploadFile(path, upload);
       setPendingPaths((p) => [...p, path]);
-      pushToast(t('webimUploaded') as string, 'info', 2500);
+      const message = upload === file
+        ? t('webimUploaded')
+        : tf('uploadImageCompressed', { size: imageUploadSize(upload) });
+      pushToast(message, 'info', 3000);
     } catch (e) {
       pushToast((e as Error).message, 'error', 4000);
+    } finally {
+      setUploading(false);
     }
-    inputEl.value = '';
   };
 
   const makeLocalMessage = (text: string, files: string[]): LocalWebImMessage => {
@@ -416,7 +425,7 @@ export const WebImPage: Component = () => {
     const text = input().trim();
     const files = pendingPaths();
     if (!text && files.length === 0) return;
-    if (!wsReady()) return;
+    if (!wsReady() || uploading() || sending()) return;
     if (bound() === false) {
       pushToast(t('webimNoBind') as string, 'error', 5000);
       return;
@@ -599,11 +608,11 @@ export const WebImPage: Component = () => {
                 variant="secondary"
                 type="button"
                 onClick={() => fileRef?.click()}
-                disabled={sending() || !wsReady()}
+                disabled={sending() || uploading() || !wsReady()}
               >
                 <span class="inline-flex items-center gap-1.5">
                   <ImagePlus class="w-4 h-4" />
-                  {t('webimAttach')}
+                  {t(uploading() ? 'uploadImagePreparing' : 'webimAttach')}
                 </span>
               </Button>
               <Switch
@@ -625,7 +634,7 @@ export const WebImPage: Component = () => {
                 size="sm"
                 variant="primary"
                 onClick={() => void send()}
-                disabled={sending() || !wsReady()}
+                disabled={sending() || uploading() || !wsReady()}
               >
                 <span class="inline-flex items-center gap-1.5">
                   <SendHorizontal class="w-4 h-4" />

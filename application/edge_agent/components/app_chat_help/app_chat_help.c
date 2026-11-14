@@ -29,9 +29,79 @@ typedef struct {
     const char *command;
     const char *description;
     const char *channel;
+    bool builtin;
 } help_command_t;
 
 typedef bool (*help_command_visitor_t)(const help_command_t *command, void *ctx);
+
+typedef struct {
+    const char *name;
+    const char *zh;
+    const char *en;
+} command_description_t;
+
+/* Upstream routes still determine which commands are available. These labels
+ * use command names so changes to argument placeholders need no translation. */
+static const command_description_t s_descriptions[] = {
+    {HELP_COMMAND, "查看设备状态和指令", "Show device status and commands"},
+    {"/session", "查看会话指令用法", NULL},
+    {"/session new", "创建并切换到新会话", NULL},
+    {"/session list", "列出此聊天的会话", NULL},
+    {"/session switch", "切换到指定会话", NULL},
+    {"/session delete", "删除指定的非当前会话", NULL},
+    {"/llm", "查看模型配置指令", NULL},
+    {"/llm help", "查看模型配置指令", NULL},
+    {"/llm ?", "查看模型配置指令", NULL},
+    {"/llm status", "查看当前模型配置", "Show the current model configuration"},
+    {"/llm show", "查看当前模型配置", NULL},
+    {"/llm setup deepseek", "使用 DeepSeek 预设", "Apply the DeepSeek preset"},
+    {"/llm setup openai", "使用 OpenAI 预设", "Apply the OpenAI preset"},
+    {"/llm setup qwen", "使用通义千问预设", "Apply the Qwen preset"},
+    {"/llm setup anthropic", "使用 Anthropic 预设", "Apply the Anthropic preset"},
+    {"/llm setup custom", "设置自定义模型服务", "Configure a custom model endpoint"},
+    {"/llm token", "设置 API 密钥", "Set the API key"},
+    {"/llm model", "设置模型名称", "Set the model name"},
+    {"/llm backend", "设置模型 API 协议", "Set the model API protocol"},
+    {"/llm base-url", "设置模型 API 地址", "Set the model API base URL"},
+    {"/llm url", "设置模型 API 地址", NULL},
+    {"/llm test", "检查配置是否填全", NULL},
+    {"/llm reset", "清空模型连接配置和密钥", "Clear the model connection settings and API key"},
+};
+
+static const command_description_t *find_description(const help_command_t *command)
+{
+    if (!command->builtin) {
+        return NULL;
+    }
+    for (size_t i = 0; i < sizeof(s_descriptions) / sizeof(s_descriptions[0]); ++i) {
+        const command_description_t *entry = &s_descriptions[i];
+        size_t length = strlen(entry->name);
+        if (strncmp(command->command, entry->name, length) != 0) {
+            continue;
+        }
+        const char *suffix = command->command + length;
+        if (!suffix[0] || (suffix[0] == ' ' &&
+                (suffix[1] == '<' || suffix[1] == '[' || strncmp(suffix + 1, "backend=", 8) == 0))) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static const char *describe_command(const help_command_t *command, bool chinese)
+{
+    const command_description_t *entry = find_description(command);
+    if (entry && chinese) {
+        return entry->zh;
+    }
+    if (command->description && command->description[0]) {
+        return command->description;
+    }
+    if (entry && entry->en) {
+        return entry->en;
+    }
+    return chinese ? "执行此设备的聊天指令" : "Run this device's chat command";
+}
 
 static bool command_cap_ready(const char *name)
 {
@@ -96,7 +166,8 @@ static bool visit_cap_usage(const char *cap, const char *prefix, const char *cha
             }
         }
         found = true;
-        if (!visit(&(help_command_t) { line, description, channel }, ctx)) {
+        if (!visit(&(help_command_t) { .command = line, .description = description,
+                                      .channel = channel, .builtin = true }, ctx)) {
             break;
         }
         line = next;
@@ -107,7 +178,7 @@ static bool visit_cap_usage(const char *cap, const char *prefix, const char *cha
 
 static void visit_commands(const claw_event_t *event, help_command_visitor_t visit, void *ctx)
 {
-    if (!visit(&(help_command_t) { HELP_COMMAND, "显示设备状态和可用指令", NULL }, ctx)) {
+    if (!visit(&(help_command_t) { .command = HELP_COMMAND, .builtin = true }, ctx)) {
         return;
     }
     claw_event_router_rule_t *rules = NULL;
@@ -128,7 +199,8 @@ static void visit_commands(const claw_event_t *event, help_command_visitor_t vis
                 visit_cap_usage(first->cap, rule->match.text, rule->match.channel, visit, ctx)) {
             continue;
         }
-        if (!visit(&(help_command_t) { rule->match.text, rule->description, rule->match.channel }, ctx)) {
+        if (!visit(&(help_command_t) { .command = rule->match.text, .description = rule->description,
+                                      .channel = rule->match.channel }, ctx)) {
             break;
         }
     }
@@ -168,12 +240,11 @@ static bool send_help_page(help_text_t *out)
 static bool append_command(const help_command_t *item, void *ctx)
 {
     help_text_t *out = ctx;
-    const char *description = item->description ? item->description : "";
-    const char *separator = description[0] ? " · " : "";
-    if (append_help(out, "%s%s%s\n", item->command, separator, description)) {
+    const char *description = describe_command(item, true);
+    if (append_help(out, "%s · %s\n", item->command, description)) {
         return true;
     }
-    return send_help_page(out) && append_help(out, "%s%s%s\n", item->command, separator, description);
+    return send_help_page(out) && append_help(out, "%s · %s\n", item->command, description);
 }
 
 static void append_usage(help_text_t *out, const char *label, const app_token_period_t *period, bool available)
@@ -237,7 +308,8 @@ static bool add_json_command(const help_command_t *command, void *ctx)
 {
     cJSON *item = cJSON_CreateObject();
     if (!item || !cJSON_AddStringToObject(item, "command", command->command) ||
-            !cJSON_AddStringToObject(item, "description", command->description ? command->description : "") ||
+            !cJSON_AddStringToObject(item, "description", describe_command(command, false)) ||
+            !cJSON_AddStringToObject(item, "description_zh", describe_command(command, true)) ||
             !cJSON_AddStringToObject(item, "channel", command->channel ? command->channel : "") ||
             !cJSON_AddItemToArray(ctx, item)) {
         cJSON_Delete(item);

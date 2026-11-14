@@ -157,9 +157,19 @@ pnpm run build
 | `http_server` 和前端导航 | 挂载 `/api/chat/help` 和指令列表页。旧 Web IM 从 WebSocket 消息的 `kind` 渲染回复图标。新版 `http_server_webim_send_session()` 直接提交 Agent 请求，需在该入口提交前处理 `/help`，再由会话聊天页面渲染帮助回复和 favicon。 |
 | `cap_session_mgr` 和 `cap_llm_config` | 用各自已有的用法说明维护子指令和别名。单独运行 `/session` 或 `/llm` 时也会显示这些说明。 |
 
+`app_chat_help.c` 中的描述表只补充中英文文案。新增内置指令时按命令名维护描述，指令是否显示仍取决于设备实际启用的路由。自定义路由沿用自己的描述。
+
 用量用设备时区分日、分月累计，只计模型响应中的真实用量。NVS 命名空间为 `claw_usage`，键为 `totals_v1`。换基线时保留此记录格式，或迁移旧值。生成前端资源后重新构建固件。回归时检查网页指令和 `/help` 一致、`/help` 不触发模型请求、普通对话增加计数、重启后统计可读。
 
 以官方 `50072775` 为基线做过三方合并检查。独立组件、事件路由和模型 HTTP 入口可自动合并。Web 会话接入、菜单和文案、主程序初始化、模型命令帮助需要按新版接口合并。`dist/index.html.gz` 随新版源码重新生成。
+
+### 3.5 网页图片上传
+
+`frontend_source/src/utils/imageUpload.ts` 在浏览器中处理超过 512 KiB 的图片。在线聊天和文件管理都在调用 `uploadFile()` 前准备文件。压缩后的文件使用 `.jpg` 扩展名。移植时接到新版的两个文件选择入口，并与 `HTTP_SERVER_UPLOAD_MAX_SIZE` 对齐。用超限图片、原尺寸小图和无法解码的图片分别验证上传结果。
+
+### 3.6 可写分区耗尽时的处理
+
+会话历史无可读记录且索引重建失败时，`claw_memory_session_load_json_alloc()` 记录错误并允许本轮聊天继续。Skill 和 Web 上传检查 `fclose()` 的结果，避免缓冲写入失败后误报成功。空的 Skill 会话记录可在有可用空间后重新激活。迁移时保留新版的索引修复流程和 Skill 注册接口，复测磁盘满时的文本回复及恢复后的 Skill 激活。
 
 ## 4. 同步官方更新
 

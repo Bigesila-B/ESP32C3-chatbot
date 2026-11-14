@@ -111,12 +111,10 @@ export const ChatHelpPage: Component = () => {
                     {(item) => (
                       <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2.5">
                         <code class="break-all text-sm text-[var(--color-text-primary)]">{item.command}</code>
-                        <Show when={item.description || item.channel}>
-                          <span class="text-xs text-[var(--color-text-muted)]">
-                            {item.description}
-                            {item.channel && ' (' + item.channel + ')'}
-                          </span>
-                        </Show>
+                        <span class="text-xs text-[var(--color-text-muted)]">
+                          {currentLocale() === 'zh-cn' ? item.description_zh || item.description : item.description}
+                          {item.channel && ' (' + item.channel + ')'}
+                        </span>
                       </li>
                     )}
                   </For>
