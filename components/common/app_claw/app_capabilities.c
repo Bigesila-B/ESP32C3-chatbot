@@ -40,6 +40,9 @@
 #if CONFIG_APP_CLAW_CAP_LUA
 #include "cap_lua.h"
 #endif
+#if CONFIG_APP_CLAW_CAP_MICROPYTHON
+#include "cap_micropython.h"
+#endif
 #if CONFIG_APP_CLAW_CAP_MCP_CLIENT
 #include "cap_mcp_client.h"
 #endif
@@ -745,6 +748,16 @@ static esp_err_t app_cap_register_agent_mgr(const app_claw_config_t *config,
 }
 #endif
 
+#if CONFIG_APP_CLAW_CAP_MICROPYTHON
+static esp_err_t app_cap_register_micropython(const app_claw_config_t *config,
+                                             const app_claw_storage_paths_t *paths)
+{
+    (void)config;
+    (void)paths;
+    return cap_micropython_register_group();
+}
+#endif
+
 static const app_capability_group_entry_t s_capability_group_entries[] = {
 #if CONFIG_APP_CLAW_CAP_AGENT_MGR
     { "cap_agent_mgr", "Agent Manager", "Register agent manager cap", true, NULL, app_cap_register_agent_mgr },
@@ -772,6 +785,9 @@ static const app_capability_group_entry_t s_capability_group_entries[] = {
 #endif
 #if CONFIG_APP_CLAW_CAP_LUA
     { "cap_lua", "Lua", "Register Lua cap", true, app_cap_prepare_lua, app_cap_register_lua },
+#endif
+#if CONFIG_APP_CLAW_CAP_MICROPYTHON
+    { "cap_micropython", "MicroPython", "Register MicroPython cap", false, NULL, app_cap_register_micropython },
 #endif
 #if CONFIG_APP_CLAW_CAP_MCP_CLIENT
     { "cap_mcp_client", "MCP Client", "Register MCP client cap", false, NULL, app_cap_register_mcp_client },
@@ -829,6 +845,9 @@ static const app_capability_group_info_t s_capability_group_infos[] = {
 #endif
 #if CONFIG_APP_CLAW_CAP_LUA
     { "cap_lua", "Lua", true },
+#endif
+#if CONFIG_APP_CLAW_CAP_MICROPYTHON
+    { "cap_micropython", "MicroPython", false },
 #endif
 #if CONFIG_APP_CLAW_CAP_MCP_CLIENT
     { "cap_mcp_client", "MCP Client", false },

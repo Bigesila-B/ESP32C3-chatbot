@@ -51,6 +51,7 @@ typedef struct {
     char search_brave_key[APP_CLAW_STR_LEN];
     char search_tavily_key[APP_CLAW_STR_LEN];
     char search_http_allowlist[APP_CLAW_STR_LEN];
+    char mcp_server_url[APP_CLAW_STR_LEN];
     char asr_provider[APP_CLAW_SHORT_STR_LEN];
     char asr_api_key[APP_CLAW_STR_LEN];
     char asr_workspace_id[APP_CLAW_STR_LEN];

@@ -122,6 +122,14 @@ menu "App Claw Config"
                 Enable the Lua capability and keep app_claw's direct dependency
                 on cap_lua.
 
+        config APP_CLAW_CAP_MICROPYTHON
+            bool "Enable MicroPython scripts for Skills"
+            depends on IDF_TARGET_ESP32S3 && SPIRAM
+            default n
+            help
+                Embed the MicroPython interpreter and register the python_run_script
+                capability for running scripts on an ESP32-S3 with PSRAM.
+
         config APP_CLAW_CAP_MCP_CLIENT
             bool "Enable MCP client capability"
             default y

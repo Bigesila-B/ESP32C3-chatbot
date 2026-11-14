@@ -22,6 +22,7 @@ export const zhCn: Dict = {
   navLlm: 'LLM 设置',
   navIm: 'IM 设置',
   navWebReq: '网络和搜索设置',
+  navMcp: 'MCP 设置',
   navMemory: '记忆管理',
   navCapabilities: 'Capabilities 管理',
   navLuaModules: 'Lua 模块管理',
@@ -185,6 +186,16 @@ export const zhCn: Dict = {
   webreqHttpAllowlist: 'HTTP 白名单（域名/IP，逗号分隔）',
   webreqHttpAllowlistPlaceholder: 'api.example.com,*.example.org,203.0.113.10',
   webreqHttpAllowlistNote: '使用逗号分隔的域名/IP，支持通配符*，单独*表示允许全部域名/IP',
+
+  mcpServerUrl: 'MCP 服务地址',
+  mcpServerUrlHint: '填写 ESP-Claw 能访问的 Streamable HTTP 服务地址。',
+  mcpTest: '测试连接',
+  mcpTesting: '正在测试连接…',
+  mcpConnected: '连接成功，第一页返回 {count} 个工具。',
+  mcpMoreTools: '服务还有更多工具。',
+  mcpTestError: '连接失败（{error}）',
+  mcpUnavailable: '当前固件未编译 MCP Client。',
+  mcpAgentNote: '要在聊天中调用 MCP 工具，请在「Capabilities 管理」中为 LLM 启用 MCP Client。更改权限后需要重启。',
 
   sectionCapabilities: 'Capability Group',
   capabilitiesDescription:

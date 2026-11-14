@@ -6,6 +6,9 @@
 #include "app_claw.h"
 #include "app_claw_cli.h"
 #include "app_capabilities.h"
+#if CONFIG_APP_CLAW_CAP_MCP_CLIENT
+#include "cap_mcp_client.h"
+#endif
 #if CONFIG_APP_CLAW_SYSTEM_UI_ENABLE
 #include "system_ui.h"
 #endif
@@ -407,6 +410,13 @@ static esp_err_t app_claw_store_current_config(const app_claw_config_t *config)
     ESP_RETURN_ON_ERROR(app_claw_ensure_config_lock(), TAG, "config lock unavailable");
 
     xSemaphoreTake(s_config_lock, portMAX_DELAY);
+#if CONFIG_APP_CLAW_CAP_MCP_CLIENT
+    esp_err_t err = cap_mcp_client_set_server_url(config->mcp_server_url);
+    if (err != ESP_OK) {
+        xSemaphoreGive(s_config_lock);
+        return err;
+    }
+#endif
     s_current_config = *config;
     s_current_config_valid = true;
     xSemaphoreGive(s_config_lock);

@@ -5,6 +5,7 @@
  */
 #pragma once
 
+#include "cJSON.h"
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -24,6 +25,15 @@ extern "C" {
  * @return ESP_OK on success, or an error code from `claw_cap_register_group()`.
  */
 esp_err_t cap_mcp_client_register_group(void);
+
+/** Validate a nonempty HTTP(S) MCP service URL. */
+esp_err_t cap_mcp_client_validate_url(const char *url);
+
+/** Set the default URL for calls that omit server_url. An empty string clears it. */
+esp_err_t cap_mcp_client_set_server_url(const char *url);
+
+/** List tools using the supplied or default server_url. The caller owns the JSON result. */
+esp_err_t cap_mcp_client_list_tools(const cJSON *input, cJSON **result_out);
 
 #ifdef __cplusplus
 }

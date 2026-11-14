@@ -61,6 +61,16 @@ static void cap_mcp_extract_content_text(const cJSON *content,
     output[offset] = '\0';
 }
 
+static esp_err_t cap_mcp_format_request_error(esp_err_t err, char *output, size_t output_size)
+{
+    if (err == ESP_ERR_NOT_FOUND) {
+        snprintf(output, output_size, "Error: Configure an MCP server in the Web settings or supply server_url.");
+    } else {
+        snprintf(output, output_size, "Error: MCP request failed (%s)", esp_err_to_name(err));
+    }
+    return err;
+}
+
 static esp_err_t cap_mcp_call_execute(const char *input_json,
                                       const claw_cap_call_context_t *ctx,
                                       char *output,
@@ -73,10 +83,11 @@ static esp_err_t cap_mcp_call_execute(const char *input_json,
 
     (void)ctx;
 
-    err = cap_mcp_call_remote_tool(input_json, &result);
+    cJSON *input = cJSON_Parse(input_json);
+    err = cap_mcp_call_remote_tool(input, &result);
+    cJSON_Delete(input);
     if (err != ESP_OK) {
-        snprintf(output, output_size, "Error: MCP request failed (%s)", esp_err_to_name(err));
-        return err;
+        return cap_mcp_format_request_error(err, output, output_size);
     }
 
     error_message = cJSON_GetStringValue(cJSON_GetObjectItem(result, "error_message"));
@@ -114,10 +125,11 @@ static esp_err_t cap_mcp_list_execute(const char *input_json,
 
     (void)ctx;
 
-    err = cap_mcp_list_remote_tools(input_json, &result);
+    cJSON *input = cJSON_Parse(input_json);
+    err = cap_mcp_client_list_tools(input, &result);
+    cJSON_Delete(input);
     if (err != ESP_OK) {
-        snprintf(output, output_size, "Error: MCP request failed (%s)", esp_err_to_name(err));
-        return err;
+        return cap_mcp_format_request_error(err, output, output_size);
     }
 
     error_message = cJSON_GetStringValue(cJSON_GetObjectItem(result, "error_message"));
@@ -128,7 +140,11 @@ static esp_err_t cap_mcp_list_execute(const char *input_json,
     }
 
     tools_array = cJSON_GetObjectItem(result, "tools");
-    if (cJSON_IsArray(tools_array)) {
+    if (!cJSON_IsArray(tools_array)) {
+        cJSON_Delete(result);
+        return cap_mcp_format_request_error(ESP_ERR_INVALID_RESPONSE, output, output_size);
+    }
+    if (output_size > 0) {
         cJSON_ArrayForEach(tool, tools_array) {
             const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(tool, "name"));
             const char *description = cJSON_GetStringValue(cJSON_GetObjectItem(tool, "description"));
@@ -226,22 +242,22 @@ static const claw_cap_descriptor_t s_mcp_client_descriptors[] = {
         .id = "mcp_list_tools",
         .name = "mcp_list_tools",
         .family = "mcp",
-        .description = "List tools from a remote MCP server.",
+        .description = "List remote MCP tools. Omit server_url to use the server saved in Web settings.",
         .kind = CLAW_CAP_KIND_CALLABLE,
         .cap_flags = CLAW_CAP_FLAG_CALLABLE_BY_LLM,
         .input_schema_json =
-        "{\"type\":\"object\",\"properties\":{\"server_url\":{\"type\":\"string\"},\"endpoint\":{\"type\":\"string\"},\"cursor\":{\"type\":\"string\"}},\"required\":[\"server_url\"]}",
+        "{\"type\":\"object\",\"properties\":{\"server_url\":{\"type\":\"string\"},\"endpoint\":{\"type\":\"string\"},\"cursor\":{\"type\":\"string\"}}}",
         .execute = cap_mcp_list_execute,
     },
     {
         .id = "mcp_call_tool",
         .name = "mcp_call_tool",
         .family = "mcp",
-        .description = "Call a tool on a remote MCP server.",
+        .description = "Call a remote MCP tool. Omit server_url to use the server saved in Web settings.",
         .kind = CLAW_CAP_KIND_CALLABLE,
         .cap_flags = CLAW_CAP_FLAG_CALLABLE_BY_LLM,
         .input_schema_json =
-        "{\"type\":\"object\",\"properties\":{\"server_url\":{\"type\":\"string\"},\"endpoint\":{\"type\":\"string\"},\"tool_name\":{\"type\":\"string\"},\"arguments\":{\"type\":\"object\"}},\"required\":[\"server_url\",\"tool_name\"]}",
+        "{\"type\":\"object\",\"properties\":{\"server_url\":{\"type\":\"string\"},\"endpoint\":{\"type\":\"string\"},\"tool_name\":{\"type\":\"string\"},\"arguments\":{\"type\":\"object\"}},\"required\":[\"tool_name\"]}",
         .execute = cap_mcp_call_execute,
     },
     {

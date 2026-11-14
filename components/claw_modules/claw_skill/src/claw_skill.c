@@ -1061,6 +1061,11 @@ static esp_err_t load_registry_dir_recursive(const char *root_dir,
             free(path);
             continue;
         }
+        if (st.st_size == 0) {
+            ESP_LOGW(TAG, "Skipping empty skill document %s", path);
+            free(path);
+            continue;
+        }
         if (*entry_count >= CLAW_SKILL_MAX_FILES) {
             ESP_LOGE(TAG, "too many skill files (cap %d) under %s", CLAW_SKILL_MAX_FILES, root_dir);
             err = ESP_ERR_INVALID_SIZE;

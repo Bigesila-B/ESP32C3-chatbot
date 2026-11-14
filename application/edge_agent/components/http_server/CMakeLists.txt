@@ -40,6 +40,10 @@ if(CONFIG_APP_CLAW_LUA_MODULE_HTTP_SERVER)
     list(APPEND http_server_requires lua_module_http_server)
 endif()
 
+if(CONFIG_APP_CLAW_CAP_MCP_CLIENT)
+    list(APPEND http_server_srcs "http_server_mcp_api.c")
+endif()
+
 idf_component_register(
     SRCS
         ${http_server_srcs}

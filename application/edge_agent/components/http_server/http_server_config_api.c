@@ -5,6 +5,10 @@
  */
 #include "http_server_priv.h"
 
+#if CONFIG_APP_CLAW_CAP_MCP_CLIENT
+#include "cap_mcp_client.h"
+#endif
+
 #include <ctype.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -70,6 +74,10 @@ static const config_field_def_t CONFIG_FIELDS[] = {
     CONFIG_FIELD("search",       search_brave_key),
     CONFIG_FIELD("search",       search_tavily_key),
     CONFIG_FIELD("search",       search_http_allowlist),
+
+#if CONFIG_APP_CLAW_CAP_MCP_CLIENT
+    CONFIG_FIELD("mcp",          mcp_server_url),
+#endif
 
     CONFIG_FIELD("capabilities", enabled_cap_groups),
     CONFIG_FIELD("capabilities", llm_visible_cap_groups),
@@ -324,6 +332,14 @@ static esp_err_t config_post_handler(httpd_req_t *req)
         if (!cJSON_IsString(item)) {
             continue;
         }
+#if CONFIG_APP_CLAW_CAP_MCP_CLIENT
+        if (strcmp(field->name, "mcp_server_url") == 0 && item->valuestring[0] &&
+                cap_mcp_client_validate_url(item->valuestring) != ESP_OK) {
+            cJSON_Delete(root);
+            free(config);
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid MCP server URL");
+        }
+#endif
         if (strcmp(field->name, "llm_max_tokens") == 0 ||
                 strcmp(field->name, "llm_default_image_max_bytes") == 0) {
             if (!is_positive_decimal_string(item->valuestring)) {

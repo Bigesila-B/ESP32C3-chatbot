@@ -20,6 +20,7 @@ export const en = {
   navLlm: 'LLM',
   navIm: 'IM',
   navWebReq: 'Network & Search Config',
+  navMcp: 'MCP Settings',
   navMemory: 'Memory',
   navCapabilities: 'Capabilities',
   navLuaModules: 'Lua Modules',
@@ -191,6 +192,16 @@ export const en = {
   webreqHttpAllowlistPlaceholder: 'api.example.com,*.example.org,203.0.113.10',
   webreqHttpAllowlistNote:
     'Use comma-separated domains/IPs. Wildcard * is supported, and a standalone * allows all domains/IPs.',
+
+  mcpServerUrl: 'MCP server URL',
+  mcpServerUrlHint: 'Enter a Streamable HTTP endpoint reachable from ESP-Claw.',
+  mcpTest: 'Test connection',
+  mcpTesting: 'Testing connection…',
+  mcpConnected: 'Connected. Tools on the first page ({count}).',
+  mcpMoreTools: 'The server has more tools.',
+  mcpTestError: 'Connection failed ({error})',
+  mcpUnavailable: 'This firmware does not include the MCP Client.',
+  mcpAgentNote: 'To use MCP in chat, enable MCP Client for the LLM in Capabilities and restart if you change that permission.',
 
   sectionCapabilities: 'Capability Groups',
   capabilitiesDescription:
