@@ -21,6 +21,7 @@
 #define HELP_COMMAND       "/help"
 #define HELP_REPLY_TITLE   "ESP-Claw /help\n"
 #define HELP_PAGE_SIZE     1400
+#define HELP_CAP_USAGE_SIZE 2048
 
 static const char *TAG = "app_chat_help";
 static atomic_bool s_registered;
@@ -28,77 +29,19 @@ static atomic_bool s_registered;
 typedef struct {
     const char *command;
     const char *description;
+    const char *description_zh;
     const char *channel;
-    bool builtin;
 } help_command_t;
 
 typedef bool (*help_command_visitor_t)(const help_command_t *command, void *ctx);
 
-typedef struct {
-    const char *name;
-    const char *zh;
-    const char *en;
-} command_description_t;
-
-/* Upstream routes still determine which commands are available. These labels
- * use command names so changes to argument placeholders need no translation. */
-static const command_description_t s_descriptions[] = {
-    {HELP_COMMAND, "查看设备状态和指令", "Show device status and commands"},
-    {"/session", "查看会话指令用法", NULL},
-    {"/session new", "创建并切换到新会话", NULL},
-    {"/session list", "列出此聊天的会话", NULL},
-    {"/session switch", "切换到指定会话", NULL},
-    {"/session delete", "删除指定的非当前会话", NULL},
-    {"/llm", "查看模型配置指令", NULL},
-    {"/llm help", "查看模型配置指令", NULL},
-    {"/llm ?", "查看模型配置指令", NULL},
-    {"/llm status", "查看当前模型配置", "Show the current model configuration"},
-    {"/llm show", "查看当前模型配置", NULL},
-    {"/llm setup deepseek", "使用 DeepSeek 预设", "Apply the DeepSeek preset"},
-    {"/llm setup openai", "使用 OpenAI 预设", "Apply the OpenAI preset"},
-    {"/llm setup qwen", "使用通义千问预设", "Apply the Qwen preset"},
-    {"/llm setup anthropic", "使用 Anthropic 预设", "Apply the Anthropic preset"},
-    {"/llm setup custom", "设置自定义模型服务", "Configure a custom model endpoint"},
-    {"/llm token", "设置 API 密钥", "Set the API key"},
-    {"/llm model", "设置模型名称", "Set the model name"},
-    {"/llm backend", "设置模型 API 协议", "Set the model API protocol"},
-    {"/llm base-url", "设置模型 API 地址", "Set the model API base URL"},
-    {"/llm url", "设置模型 API 地址", NULL},
-    {"/llm test", "检查配置是否填全", NULL},
-    {"/llm reset", "清空模型连接配置和密钥", "Clear the model connection settings and API key"},
-};
-
-static const command_description_t *find_description(const help_command_t *command)
-{
-    if (!command->builtin) {
-        return NULL;
-    }
-    for (size_t i = 0; i < sizeof(s_descriptions) / sizeof(s_descriptions[0]); ++i) {
-        const command_description_t *entry = &s_descriptions[i];
-        size_t length = strlen(entry->name);
-        if (strncmp(command->command, entry->name, length) != 0) {
-            continue;
-        }
-        const char *suffix = command->command + length;
-        if (!suffix[0] || (suffix[0] == ' ' &&
-                (suffix[1] == '<' || suffix[1] == '[' || strncmp(suffix + 1, "backend=", 8) == 0))) {
-            return entry;
-        }
-    }
-    return NULL;
-}
-
 static const char *describe_command(const help_command_t *command, bool chinese)
 {
-    const command_description_t *entry = find_description(command);
-    if (entry && chinese) {
-        return entry->zh;
+    if (chinese && command->description_zh && command->description_zh[0]) {
+        return command->description_zh;
     }
     if (command->description && command->description[0]) {
         return command->description;
-    }
-    if (entry && entry->en) {
-        return entry->en;
     }
     return chinese ? "执行此设备的聊天指令" : "Run this device's chat command";
 }
@@ -130,47 +73,67 @@ static bool rule_available(const claw_event_router_rule_t *rule, const claw_even
     return true;
 }
 
-/* The existing command capabilities already return their usage for an empty
- * command. Read that usage so upstream additions show up in both help views. */
-static bool visit_cap_usage(const char *cap, const char *prefix, const char *channel,
-                            help_command_visitor_t visit, void *ctx)
+static bool next_usage_line(char **cursor, const char *prefix, size_t prefix_len,
+                            const char **command, const char **description)
 {
-    char *usage = calloc(1, 2048);
+    char *line = *cursor;
+    if (!line || strncmp(line, prefix, prefix_len) != 0 ||
+            (line[prefix_len] && line[prefix_len] != ' ' && line[prefix_len] != '\n')) {
+        return false;
+    }
+    char *next = strchr(line, '\n');
+    if (next) {
+        *next++ = '\0';
+    }
+    char *separator = strstr(line, "  ");
+    if (separator) {
+        *separator++ = '\0';
+        while (*separator == ' ') {
+            ++separator;
+        }
+    }
+    *command = line;
+    *description = separator;
+    *cursor = next;
+    return true;
+}
+
+/* Use the same translations as the chat command capabilities. */
+static bool visit_cap_usage(const char *cap, const char *prefix, const char *channel,
+                            bool both_languages, help_command_visitor_t visit, void *ctx)
+{
+    char *usage = calloc(both_languages ? 2 : 1, HELP_CAP_USAGE_SIZE);
     if (!usage) {
         return false;
     }
     claw_cap_call_context_t call_ctx = { .caller = CLAW_CAP_CALLER_SYSTEM };
-    if (claw_cap_call(cap, "{}", &call_ctx, usage, 2048) != ESP_OK) {
+    if (claw_cap_call(cap, "{\"language\":\"zh-cn\"}", &call_ctx, usage, HELP_CAP_USAGE_SIZE) != ESP_OK) {
         free(usage);
         return false;
     }
 
     bool found = false;
     size_t prefix_len = strlen(prefix);
-    char *line = strchr(usage, '\n');
-    while (line && line[1] == '/') {
-        ++line;
-        char *next = strchr(line, '\n');
-        if (next) {
-            *next = '\0';
-        }
-        if (strncmp(line, prefix, prefix_len) != 0 || (line[prefix_len] && line[prefix_len] != ' ')) {
-            break;
-        }
-        char *description = strstr(line, "  ");
-        if (description) {
-            *description = '\0';
-            ++description;
-            while (*description == ' ') {
-                ++description;
-            }
+    char *zh = strchr(usage, '\n');
+    char *en = NULL;
+    if (both_languages && claw_cap_call(cap, "{\"language\":\"en\"}", &call_ctx,
+                                        usage + HELP_CAP_USAGE_SIZE, HELP_CAP_USAGE_SIZE) == ESP_OK) {
+        en = strchr(usage + HELP_CAP_USAGE_SIZE, '\n');
+    }
+    zh = zh ? zh + 1 : NULL;
+    en = en ? en + 1 : NULL;
+    help_command_t item = { .channel = channel };
+    while (next_usage_line(&zh, prefix, prefix_len, &item.command, &item.description_zh)) {
+        const char *en_command;
+        item.description = NULL;
+        if (next_usage_line(&en, prefix, prefix_len, &en_command, &item.description) &&
+                strcmp(item.command, en_command) != 0) {
+            item.description = NULL;
         }
         found = true;
-        if (!visit(&(help_command_t) { .command = line, .description = description,
-                                      .channel = channel, .builtin = true }, ctx)) {
+        if (!visit(&item, ctx)) {
             break;
         }
-        line = next;
     }
     free(usage);
     return found;
@@ -178,7 +141,11 @@ static bool visit_cap_usage(const char *cap, const char *prefix, const char *cha
 
 static void visit_commands(const claw_event_t *event, help_command_visitor_t visit, void *ctx)
 {
-    if (!visit(&(help_command_t) { .command = HELP_COMMAND, .builtin = true }, ctx)) {
+    if (!visit(&(help_command_t) {
+        .command = HELP_COMMAND,
+        .description = "Show device status and commands",
+        .description_zh = "查看设备状态和指令",
+    }, ctx)) {
         return;
     }
     claw_event_router_rule_t *rules = NULL;
@@ -196,7 +163,7 @@ static void visit_commands(const claw_event_t *event, help_command_visitor_t vis
                 rule->match.text_match_rule == CLAW_EVENT_ROUTER_TEXT_MATCH_PREFIX &&
                 ((strcmp(rule->match.text, "/session") == 0 && strcmp(first->cap, "session_command") == 0) ||
                  (strcmp(rule->match.text, "/llm") == 0 && strcmp(first->cap, "llm_config_command") == 0)) &&
-                visit_cap_usage(first->cap, rule->match.text, rule->match.channel, visit, ctx)) {
+                visit_cap_usage(first->cap, rule->match.text, rule->match.channel, !event, visit, ctx)) {
             continue;
         }
         if (!visit(&(help_command_t) { .command = rule->match.text, .description = rule->description,
@@ -244,7 +211,7 @@ static bool append_command(const help_command_t *item, void *ctx)
     if (append_help(out, "%s · %s\n", item->command, description)) {
         return true;
     }
-    return send_help_page(out) && append_help(out, "%s · %s\n", item->command, description);
+    return send_help_page(out) && append_help(out, HELP_REPLY_TITLE "%s · %s\n", item->command, description);
 }
 
 static void append_usage(help_text_t *out, const char *label, const app_token_period_t *period, bool available)

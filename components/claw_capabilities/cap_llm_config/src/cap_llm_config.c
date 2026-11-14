@@ -95,29 +95,43 @@ static const cap_llm_preset_t s_presets[] = {
     },
 };
 
-static const char *s_usage =
-    "Usage:\n"
-    "/llm  Show model configuration commands\n"
-    "/llm help  Show model configuration commands\n"
-    "/llm ?  Alias for /llm help\n"
-    "/llm status\n"
-    "/llm show  Alias for /llm status\n"
-    "/llm setup deepseek <api_token> [model]\n"
-    "/llm setup openai <api_token> [model]\n"
-    "/llm setup qwen <api_token> [model]\n"
-    "/llm setup anthropic <api_token> [model]\n"
-    "/llm setup custom backend=<backend> url=<base_url> model=<model> token=<api_token>\n"
-    "/llm token <api_token>\n"
-    "/llm model <model>\n"
-    "/llm backend <backend>\n"
-    "/llm base-url <base_url>\n"
-    "/llm url <base_url>  Alias for /llm base-url\n"
-    "/llm test  Check whether the configuration is complete\n"
-    "/llm reset\n";
+#define LLM_CUSTOM_SETUP "/llm setup custom backend=<backend> url=<base_url> model=<model> token=<api_token>"
+#define LLM_COMMAND_ROWS(row) \
+    row("/llm", "Show model configuration commands", "查看模型配置指令") \
+    row("/llm help", "Show model configuration commands", "查看模型配置指令") \
+    row("/llm ?", "Alias for /llm help", "查看模型配置指令，与 /llm help 相同") \
+    row("/llm status", "Show current model settings", "查看当前模型配置") \
+    row("/llm show", "Alias for /llm status", "查看当前模型配置，与 /llm status 相同") \
+    row("/llm setup deepseek <api_token> [model]", "Apply the DeepSeek preset", "使用 DeepSeek 预设，模型名称可省略") \
+    row("/llm setup openai <api_token> [model]", "Apply the OpenAI preset", "使用 OpenAI 预设，模型名称可省略") \
+    row("/llm setup qwen <api_token> [model]", "Apply the Qwen preset", "使用通义千问预设，模型名称可省略") \
+    row("/llm setup anthropic <api_token> [model]", "Apply the Anthropic preset", "使用 Anthropic 预设，模型名称可省略") \
+    row(LLM_CUSTOM_SETUP, "Configure a custom model service", "配置自定义协议、API 地址、模型名称和密钥") \
+    row("/llm token <api_token>", "Set the API key", "设置 API 密钥") \
+    row("/llm model <model>", "Set the model name", "设置模型名称") \
+    row("/llm backend <backend>", "Set the model API protocol", "设置模型 API 协议") \
+    row("/llm base-url <base_url>", "Set the API base URL", "设置模型 API 地址") \
+    row("/llm url <base_url>", "Alias for /llm base-url", "设置模型 API 地址，与 /llm base-url 相同") \
+    row("/llm test", "Check whether configuration is complete", "检查模型配置是否完整") \
+    row("/llm reset", "Clear model connection settings and API key", "清空模型连接配置和 API 密钥")
+#define COMMAND_ROW_EN(command, en, zh) command "  " en "\n"
+#define COMMAND_ROW_ZH(command, en, zh) command "  " zh "\n"
+
+static const char s_usage_en[] = "Usage:\n" LLM_COMMAND_ROWS(COMMAND_ROW_EN);
+static const char s_usage_zh[] =
+    "模型配置指令\n"
+    LLM_COMMAND_ROWS(COMMAND_ROW_ZH)
+    "\n"
+    "<...> 内是必填参数，[model] 表示模型名称可省略。";
 
 static bool is_space(char ch)
 {
     return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f' || ch == '\v';
+}
+
+static bool config_flag_enabled(const char *value)
+{
+    return strcmp(value, "true") == 0 || strcmp(value, "1") == 0;
 }
 
 static const char *skip_space(const char *text)
@@ -131,7 +145,7 @@ static const char *skip_space(const char *text)
     return text;
 }
 
-static esp_err_t read_command_input(const char *input_json, char *command, size_t command_size)
+static esp_err_t read_command_input(const char *input_json, char *command, size_t command_size, bool *chinese)
 {
     cJSON *root = NULL;
     cJSON *item = NULL;
@@ -147,6 +161,14 @@ static esp_err_t read_command_input(const char *input_json, char *command, size_
     if (!cJSON_IsObject(root)) {
         cJSON_Delete(root);
         return ESP_ERR_INVALID_ARG;
+    }
+    const cJSON *language = cJSON_GetObjectItemCaseSensitive(root, "language");
+    if (cJSON_IsString(language)) {
+        if (strcmp(language->valuestring, "zh-cn") == 0) {
+            *chinese = true;
+        } else if (strcmp(language->valuestring, "en") == 0) {
+            *chinese = false;
+        }
     }
     item = cJSON_GetObjectItemCaseSensitive(root, "command");
     if (cJSON_IsString(item) && item->valuestring) {
@@ -224,7 +246,7 @@ static const cap_llm_preset_t *find_preset(const char *id)
     return NULL;
 }
 
-static void mask_token(const char *token, char *out, size_t out_size)
+static void mask_token(const char *token, bool chinese, char *out, size_t out_size)
 {
     size_t len;
 
@@ -232,12 +254,12 @@ static void mask_token(const char *token, char *out, size_t out_size)
         return;
     }
     if (!token || !token[0]) {
-        strlcpy(out, "(missing)", out_size);
+        strlcpy(out, chinese ? "未填写" : "(missing)", out_size);
         return;
     }
     len = strlen(token);
     if (len <= 8) {
-        strlcpy(out, "configured", out_size);
+        strlcpy(out, chinese ? "已配置" : "configured", out_size);
         return;
     }
     snprintf(out, out_size, "%.4s...%s", token, token + len - 4);
@@ -293,25 +315,38 @@ static bool context_is_obvious_group_chat(const claw_cap_call_context_t *ctx)
            strstr(chat_id, "guild") != NULL;
 }
 
-static void write_status(const cap_llm_config_t *config, char *output, size_t output_size)
+static void write_status(const cap_llm_config_t *config, bool chinese, char *output, size_t output_size)
 {
     char masked[32];
 
-    mask_token(config->api_key, masked, sizeof(masked));
+    mask_token(config->api_key, chinese, masked, sizeof(masked));
+    const char *missing = chinese ? "未填写" : "(missing)";
+    const char *tools = config->supports_tools[0] ? config->supports_tools : "false";
+    const char *vision = config->supports_vision[0] ? config->supports_vision : "false";
+    if (chinese) {
+        tools = config_flag_enabled(tools) ? "开启" : "关闭";
+        vision = config_flag_enabled(vision) ? "开启" : "关闭";
+    }
     snprintf(output,
              output_size,
+             chinese ?
+             "模型配置状态\n"
+             "协议 %s\n"
+             "API 地址 %s\n"
+             "模型 %s\n"
+             "API 密钥 %s\n"
+             "工具调用 %s · 图片输入 %s" :
              "LLM status\n"
              "backend: %s\n"
              "base_url: %s\n"
              "model: %s\n"
              "token: %s\n"
              "tools: %s vision: %s",
-             config->backend_type[0] ? config->backend_type : "(missing)",
-             config->base_url[0] ? config->base_url : "(missing)",
-             config->model[0] ? config->model : "(missing)",
+             config->backend_type[0] ? config->backend_type : missing,
+             config->base_url[0] ? config->base_url : missing,
+             config->model[0] ? config->model : missing,
              masked,
-             config->supports_tools[0] ? config->supports_tools : "false",
-             config->supports_vision[0] ? config->supports_vision : "false");
+             tools, vision);
 }
 
 static bool config_ready(const cap_llm_config_t *config)
@@ -322,27 +357,31 @@ static bool config_ready(const cap_llm_config_t *config)
            config->model[0];
 }
 
-static esp_err_t save_config(cap_llm_config_t *config, char *output, size_t output_size)
+static esp_err_t save_config(cap_llm_config_t *config, bool chinese, char *output, size_t output_size)
 {
     esp_err_t err;
 
     if (!s_provider.apply_config) {
-        snprintf(output, output_size, "LLM config save failed: provider is not configured.");
+        strlcpy(output, chinese ? "模型配置尚未就绪，无法保存。" :
+                "LLM config save failed: provider is not configured.", output_size);
         return ESP_ERR_INVALID_STATE;
     }
 
     err = s_provider.apply_config(config, s_provider.user_ctx);
 
     if (err != ESP_OK) {
-        snprintf(output, output_size, "LLM config save failed: %s", esp_err_to_name(err));
+        snprintf(output, output_size, chinese ? "保存模型配置失败（%s）。" :
+                 "LLM config save failed: %s", esp_err_to_name(err));
         return err;
     }
-    snprintf(output,
-             output_size,
-             "LLM config saved. %s",
-             config_ready(config) ?
-             "The next message will use this model." :
-             "Some required fields are still missing; run /llm status.");
+    bool ready = config_ready(config);
+    if (chinese) {
+        strlcpy(output, ready ? "已保存模型配置。下一条消息将使用此模型。" :
+                "已保存模型配置。部分必填项仍为空，可发送 /llm status 查看。", output_size);
+    } else {
+        strlcpy(output, ready ? "LLM config saved. The next message will use this model." :
+                "LLM config saved. Some required fields are still missing; run /llm status.", output_size);
+    }
     return ESP_OK;
 }
 
@@ -357,6 +396,9 @@ static esp_err_t llm_config_execute(const char *input_json,
     const char *cursor = NULL;
     char subcommand[32];
     bool has_subcommand = false;
+    bool chat_command = ctx && ctx->source_cap && strcmp(ctx->source_cap, "claw_event_router") == 0 &&
+                        ctx->chat_id && ctx->chat_id[0];
+    bool chinese = chat_command;
     esp_err_t err = ESP_OK;
 
     if (!output || output_size == 0) {
@@ -369,44 +411,49 @@ static esp_err_t llm_config_execute(const char *input_json,
     command = calloc(1, 512);
     if (!config || !parse_buf || !command) {
         err = ESP_ERR_NO_MEM;
-        snprintf(output, output_size, "LLM command failed: out of memory.");
+        strlcpy(output, chinese ? "设备内存不足，无法执行模型配置指令。" :
+                "LLM command failed: out of memory.", output_size);
         goto cleanup;
     }
 
-    err = read_command_input(input_json, command, 512);
+    err = read_command_input(input_json, command, 512, &chinese);
+    const char *usage = chinese ? s_usage_zh : s_usage_en;
     if (err != ESP_OK) {
-        snprintf(output, output_size, "Invalid /llm command input.");
+        strlcpy(output, chinese ? "/llm 参数无效，请发送 /llm help 查看用法。" :
+                "Invalid /llm command input.", output_size);
         goto cleanup;
     }
     cursor = command;
     err = read_token(&cursor, subcommand, sizeof(subcommand), &has_subcommand);
     if (err != ESP_OK || !has_subcommand ||
             strcmp(subcommand, "help") == 0 || strcmp(subcommand, "?") == 0) {
-        strlcpy(output, s_usage, output_size);
+        strlcpy(output, usage, output_size);
         err = ESP_OK;
         goto cleanup;
     }
 
     if (!s_provider.get_config) {
-        snprintf(output, output_size, "LLM config is not ready: provider is not configured.");
+        strlcpy(output, chinese ? "模型配置尚未就绪。" :
+                "LLM config is not ready: provider is not configured.", output_size);
         err = ESP_ERR_INVALID_STATE;
         goto cleanup;
     }
 
     err = s_provider.get_config(config, s_provider.user_ctx);
     if (err != ESP_OK) {
-        snprintf(output, output_size, "LLM config is not ready: %s", esp_err_to_name(err));
+        snprintf(output, output_size, chinese ? "无法读取模型配置（%s）。" :
+                 "LLM config is not ready: %s", esp_err_to_name(err));
         goto cleanup;
     }
 
     if (strcmp(subcommand, "status") == 0 || strcmp(subcommand, "show") == 0) {
-        write_status(config, output, output_size);
+        write_status(config, chinese, output, output_size);
         err = ESP_OK;
         goto cleanup;
     }
 
     if (command_has_sensitive_token(subcommand, command) && context_is_obvious_group_chat(ctx)) {
-        strlcpy(output,
+        strlcpy(output, chinese ? "请在私聊、在线聊天或设备设置页填写 API 密钥。" :
                 "For safety, configure API tokens in a private chat, Web IM, or the device settings page.",
                 output_size);
         err = ESP_OK;
@@ -424,7 +471,7 @@ static esp_err_t llm_config_execute(const char *input_json,
             goto cleanup;
         }
         if (!has_provider) {
-            strlcpy(output, s_usage, output_size);
+            strlcpy(output, usage, output_size);
             err = ESP_OK;
             goto cleanup;
         }
@@ -466,8 +513,9 @@ static esp_err_t llm_config_execute(const char *input_json,
                                              sizeof(parse_buf->custom_token));
             }
             if (!has_backend || !(has_url || has_base_url) || !has_model || !has_token) {
-                strlcpy(output,
-                        "Usage: /llm setup custom backend=<backend> url=<base_url> model=<model> token=<api_token>",
+                strlcpy(output, chinese ?
+                        "请填写协议、地址、模型名称和 API 密钥。\n" LLM_CUSTOM_SETUP :
+                        "Usage: " LLM_CUSTOM_SETUP,
                         output_size);
                 err = ESP_OK;
                 goto cleanup;
@@ -488,7 +536,7 @@ static esp_err_t llm_config_execute(const char *input_json,
                 strlcpy(config->default_image_max_bytes, "524288",
                         sizeof(config->default_image_max_bytes));
             }
-            err = save_config(config, output, output_size);
+            err = save_config(config, chinese, output, output_size);
             goto cleanup;
         }
 
@@ -496,9 +544,9 @@ static esp_err_t llm_config_execute(const char *input_json,
         if (!preset) {
             snprintf(output,
                      output_size,
-                     "Unknown LLM provider: %s\n\n%s",
+                     chinese ? "未知的模型服务商 %s。\n\n%s" : "Unknown LLM provider: %s\n\n%s",
                      parse_buf->provider,
-                     s_usage);
+                     usage);
             err = ESP_OK;
             goto cleanup;
         }
@@ -513,7 +561,8 @@ static esp_err_t llm_config_execute(const char *input_json,
             goto cleanup;
         }
         if (!has_token) {
-            snprintf(output, output_size, "Missing API token.\n\n%s", s_usage);
+            snprintf(output, output_size, chinese ? "缺少 API 密钥。\n\n%s" : "Missing API token.\n\n%s",
+                     usage);
             err = ESP_OK;
             goto cleanup;
         }
@@ -522,7 +571,7 @@ static esp_err_t llm_config_execute(const char *input_json,
         if (has_model) {
             strlcpy(config->model, parse_buf->model, sizeof(config->model));
         }
-        err = save_config(config, output, output_size);
+        err = save_config(config, chinese, output, output_size);
         goto cleanup;
     }
 
@@ -535,12 +584,13 @@ static esp_err_t llm_config_execute(const char *input_json,
             goto cleanup;
         }
         if (!has_token) {
-            strlcpy(output, "Usage: /llm token <api_token>", output_size);
+            strlcpy(output, chinese ? "请填写 API 密钥。\n/llm token <api_token>" :
+                    "Usage: /llm token <api_token>", output_size);
             err = ESP_OK;
             goto cleanup;
         }
         strlcpy(config->api_key, parse_buf->token, sizeof(config->api_key));
-        err = save_config(config, output, output_size);
+        err = save_config(config, chinese, output, output_size);
         goto cleanup;
     }
 
@@ -553,12 +603,13 @@ static esp_err_t llm_config_execute(const char *input_json,
             goto cleanup;
         }
         if (!has_model) {
-            strlcpy(output, "Usage: /llm model <model>", output_size);
+            strlcpy(output, chinese ? "请填写模型名称。\n/llm model <model>" :
+                    "Usage: /llm model <model>", output_size);
             err = ESP_OK;
             goto cleanup;
         }
         strlcpy(config->model, parse_buf->model, sizeof(config->model));
-        err = save_config(config, output, output_size);
+        err = save_config(config, chinese, output, output_size);
         goto cleanup;
     }
 
@@ -571,12 +622,14 @@ static esp_err_t llm_config_execute(const char *input_json,
             goto cleanup;
         }
         if (!has_backend) {
-            strlcpy(output, "Usage: /llm backend <openai_compatible|anthropic_compatible>", output_size);
+            strlcpy(output, chinese ?
+                    "请选择模型 API 协议。\n/llm backend <openai_compatible|anthropic_compatible>" :
+                    "Usage: /llm backend <openai_compatible|anthropic_compatible>", output_size);
             err = ESP_OK;
             goto cleanup;
         }
         strlcpy(config->backend_type, parse_buf->backend, sizeof(config->backend_type));
-        err = save_config(config, output, output_size);
+        err = save_config(config, chinese, output, output_size);
         goto cleanup;
     }
 
@@ -589,22 +642,25 @@ static esp_err_t llm_config_execute(const char *input_json,
             goto cleanup;
         }
         if (!has_url) {
-            strlcpy(output, "Usage: /llm base-url <base_url>", output_size);
+            strlcpy(output, chinese ? "请填写模型 API 地址。\n/llm base-url <base_url>" :
+                    "Usage: /llm base-url <base_url>", output_size);
             err = ESP_OK;
             goto cleanup;
         }
         strlcpy(config->base_url, parse_buf->url, sizeof(config->base_url));
-        err = save_config(config, output, output_size);
+        err = save_config(config, chinese, output, output_size);
         goto cleanup;
     }
 
     if (strcmp(subcommand, "test") == 0) {
-        snprintf(output,
-                 output_size,
-                 "%s",
-                 config_ready(config) ?
-                 "LLM config has all required fields. Send a normal message to test the model." :
-                 "LLM config is incomplete. Run /llm status.");
+        bool ready = config_ready(config);
+        if (chinese) {
+            strlcpy(output, ready ? "模型配置已填全，发送一条普通消息即可测试。" :
+                    "模型配置还未填全，可发送 /llm status 查看。", output_size);
+        } else {
+            strlcpy(output, ready ? "LLM config has all required fields. Send a normal message to test the model." :
+                    "LLM config is incomplete. Run /llm status.", output_size);
+        }
         err = ESP_OK;
         goto cleanup;
     }
@@ -619,18 +675,23 @@ static esp_err_t llm_config_execute(const char *input_json,
         config->supports_tools[0] = '\0';
         config->supports_vision[0] = '\0';
         config->image_remote_url_only[0] = '\0';
-        err = save_config(config, output, output_size);
+        err = save_config(config, chinese, output, output_size);
         goto cleanup;
     }
 
-    strlcpy(output, s_usage, output_size);
+    strlcpy(output, usage, output_size);
     err = ESP_OK;
 
 cleanup:
+    if (err != ESP_OK && !output[0]) {
+        strlcpy(output, chinese ? "/llm 参数无效或过长，请发送 /llm help 查看用法。" :
+                "Invalid or too long /llm argument. Run /llm help.", output_size);
+    }
     free(command);
     free(parse_buf);
     free(config);
-    return err;
+    /* The router sends the command's text reply after a successful cap call. */
+    return chat_command && output[0] ? ESP_OK : err;
 }
 
 static const claw_cap_descriptor_t s_llm_config_caps[] = {
@@ -641,7 +702,8 @@ static const claw_cap_descriptor_t s_llm_config_caps[] = {
         .description = "Handle /llm configuration commands.",
         .kind = CLAW_CAP_KIND_CALLABLE,
         .cap_flags = CLAW_CAP_FLAG_RESTRICTED,
-        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}}}",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"},"
+                             "\"language\":{\"type\":\"string\",\"enum\":[\"en\",\"zh-cn\"]}}}",
         .execute = llm_config_execute,
     },
 };

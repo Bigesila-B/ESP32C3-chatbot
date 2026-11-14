@@ -16,13 +16,18 @@
 
 static const char *TAG = "cap_session_mgr";
 
-static const char *s_session_mgr_usage =
+#define SESSION_COMMAND_ROWS(row) \
+    row("/session", "Show session commands", "查看会话指令") \
+    row("/session new [name]", "Create and switch to a new session", "创建并切换到新会话，名称可省略") \
+    row("/session list", "List sessions in this chat", "列出此聊天的会话") \
+    row("/session switch <name>", "Switch to an existing session", "按名称切换会话") \
+    row("/session delete <name>", "Delete a non-current session", "删除指定的非当前会话")
+#define COMMAND_ROW_EN(command, en, zh) command "  " en "\n"
+#define COMMAND_ROW_ZH(command, en, zh) command "  " zh "\n"
+
+static const char s_session_mgr_usage_en[] =
     "Usage:\n"
-    "/session                  Show session commands\n"
-    "/session new [name]       Create and switch to a new session\n"
-    "/session list             List sessions in this chat\n"
-    "/session switch <name>    Switch to an existing session\n"
-    "/session delete <name>    Delete a non-current session\n"
+    SESSION_COMMAND_ROWS(COMMAND_ROW_EN)
     "\n"
     "Examples:\n"
     "/session new\n"
@@ -32,6 +37,13 @@ static const char *s_session_mgr_usage =
     "/session delete project-a\n"
     "\n"
     "Session names must be 1-32 characters and may only contain A-Z, a-z, 0-9, _ or -.";
+
+static const char s_session_mgr_usage_zh[] =
+    "会话指令\n"
+    SESSION_COMMAND_ROWS(COMMAND_ROW_ZH)
+    "\n"
+    "例如发送 /session new project-a 创建名为 project-a 的会话。\n"
+    "名称可用 1–32 个英文字母、数字、下划线或连字符。";
 
 typedef enum {
     CAP_SESSION_MGR_CMD_NEW,
@@ -93,7 +105,8 @@ static esp_err_t cap_session_mgr_append_output(char *output,
 
 static esp_err_t cap_session_mgr_read_command_input(const char *input_json,
                                                     char *command,
-                                                    size_t command_size)
+                                                    size_t command_size,
+                                                    bool *chinese)
 {
     cJSON *root = NULL;
     cJSON *item = NULL;
@@ -110,6 +123,14 @@ static esp_err_t cap_session_mgr_read_command_input(const char *input_json,
     if (!cJSON_IsObject(root)) {
         cJSON_Delete(root);
         return ESP_ERR_INVALID_ARG;
+    }
+    const cJSON *language = cJSON_GetObjectItemCaseSensitive(root, "language");
+    if (cJSON_IsString(language)) {
+        if (strcmp(language->valuestring, "zh-cn") == 0) {
+            *chinese = true;
+        } else if (strcmp(language->valuestring, "en") == 0) {
+            *chinese = false;
+        }
     }
     item = cJSON_GetObjectItemCaseSensitive(root, "command");
     if (!item || cJSON_IsNull(item)) {
@@ -243,11 +264,14 @@ static void cap_session_mgr_write_format(char *output, size_t output_size, const
 }
 
 static bool cap_session_mgr_context_has_chat(const claw_cap_call_context_t *ctx,
+                                             bool chinese,
                                              char *output,
                                              size_t output_size)
 {
     if (!ctx || !ctx->channel || !ctx->channel[0] || !ctx->chat_id || !ctx->chat_id[0]) {
-        cap_session_mgr_write_message(output, output_size, "Session command failed: missing chat context.");
+        cap_session_mgr_write_message(output, output_size, chinese ?
+                                      "缺少聊天信息，无法执行会话指令。" :
+                                      "Session command failed: missing chat context.");
         ESP_LOGW(TAG, "Session command missing channel or chat_id");
         return false;
     }
@@ -256,14 +280,17 @@ static bool cap_session_mgr_context_has_chat(const claw_cap_call_context_t *ctx,
 }
 
 static bool cap_session_mgr_context_ready(const claw_cap_call_context_t *ctx,
+                                          bool chinese,
                                           char *output,
                                           size_t output_size)
 {
-    if (!cap_session_mgr_context_has_chat(ctx, output, output_size)) {
+    if (!cap_session_mgr_context_has_chat(ctx, chinese, output, output_size)) {
         return false;
     }
     if (!claw_session_mgr_is_configured()) {
-        cap_session_mgr_write_message(output, output_size, "Session command failed: session manager is not configured.");
+        cap_session_mgr_write_message(output, output_size, chinese ?
+                                      "会话管理尚未配置。" :
+                                      "Session command failed: session manager is not configured.");
         ESP_LOGW(TAG, "Session manager command called before configuration");
         return false;
     }
@@ -275,6 +302,7 @@ static void cap_session_mgr_write_storage_error(const char *action,
                                                 const claw_cap_call_context_t *ctx,
                                                 const char *alias,
                                                 esp_err_t err,
+                                                bool chinese,
                                                 char *output,
                                                 size_t output_size)
 {
@@ -285,19 +313,20 @@ static void cap_session_mgr_write_storage_error(const char *action,
              ctx->chat_id,
              alias ? alias : "",
              esp_err_to_name(err));
-    cap_session_mgr_write_message(output,
-                                  output_size,
+    cap_session_mgr_write_message(output, output_size, chinese ?
+                                  "无法访问会话存储，请检查设备的剩余空间。" :
                                   "Session command failed: unable to access session storage.");
 }
 
 static esp_err_t cap_session_mgr_write_list_output(const claw_session_mgr_alias_map_t *map,
+                                                   bool chinese,
                                                    char *output,
                                                    size_t output_size)
 {
     size_t offset = 0;
     esp_err_t err;
 
-    err = cap_session_mgr_append_output(output, output_size, &offset, "Sessions:");
+    err = cap_session_mgr_append_output(output, output_size, &offset, "%s", chinese ? "会话列表" : "Sessions:");
     if (err != ESP_OK) {
         return err;
     }
@@ -307,7 +336,8 @@ static esp_err_t cap_session_mgr_write_list_output(const claw_session_mgr_alias_
                                             &offset,
                                             "\n* %s%s",
                                             map->sessions[i],
-                                            strcmp(map->sessions[i], map->current_alias) == 0 ? " (current)" : "");
+                                            strcmp(map->sessions[i], map->current_alias) == 0 ?
+                                            (chinese ? "（当前）" : " (current)") : "");
         if (err != ESP_OK) {
             return err;
         }
@@ -320,6 +350,7 @@ static esp_err_t cap_session_mgr_command_execute(cap_session_mgr_command_t comma
                                                  const char *alias,
                                                  bool has_alias,
                                                  const claw_cap_call_context_t *ctx,
+                                                 bool chinese,
                                                  char *output,
                                                  size_t output_size)
 {
@@ -327,7 +358,7 @@ static esp_err_t cap_session_mgr_command_execute(cap_session_mgr_command_t comma
     claw_session_mgr_alias_map_t map;
     esp_err_t err;
 
-    if (!cap_session_mgr_context_ready(ctx, output, output_size)) {
+    if (!cap_session_mgr_context_ready(ctx, chinese, output, output_size)) {
         return ESP_OK;
     }
 
@@ -344,7 +375,7 @@ static esp_err_t cap_session_mgr_command_execute(cap_session_mgr_command_t comma
     case CAP_SESSION_MGR_CMD_LIST:
         err = claw_session_mgr_list_chat_sessions(0, ctx->channel, ctx->chat_id, &map);
         if (err == ESP_OK) {
-            err = cap_session_mgr_write_list_output(&map, output, output_size);
+            err = cap_session_mgr_write_list_output(&map, chinese, output, output_size);
         }
         break;
     case CAP_SESSION_MGR_CMD_SWITCH:
@@ -371,6 +402,7 @@ static esp_err_t cap_session_mgr_command_execute(cap_session_mgr_command_t comma
     if (err == ESP_ERR_INVALID_STATE && command == CAP_SESSION_MGR_CMD_NEW) {
         cap_session_mgr_write_format(output,
                                      output_size,
+                                     chinese ? "已存在名为 %s 的会话。" :
                                      "Cannot create session \"%s\": a session with that name already exists.",
                                      alias);
         return ESP_OK;
@@ -378,6 +410,7 @@ static esp_err_t cap_session_mgr_command_execute(cap_session_mgr_command_t comma
     if (command == CAP_SESSION_MGR_CMD_SWITCH && err == ESP_ERR_NOT_FOUND) {
         cap_session_mgr_write_format(output,
                                      output_size,
+                                     chinese ? "找不到会话 %s，发送 /session list 查看可用会话。" :
                                      "Cannot switch to session \"%s\": no such session. Send /session list to list sessions.",
                                      alias);
         return ESP_OK;
@@ -385,6 +418,7 @@ static esp_err_t cap_session_mgr_command_execute(cap_session_mgr_command_t comma
     if (command == CAP_SESSION_MGR_CMD_DELETE && err == ESP_ERR_NOT_FOUND) {
         cap_session_mgr_write_format(output,
                                      output_size,
+                                     chinese ? "找不到会话 %s，发送 /session list 查看可用会话。" :
                                      "Cannot delete session \"%s\": no such session. Send /session list to list sessions.",
                                      alias);
         return ESP_OK;
@@ -392,18 +426,21 @@ static esp_err_t cap_session_mgr_command_execute(cap_session_mgr_command_t comma
     if (command == CAP_SESSION_MGR_CMD_DELETE && err == ESP_ERR_INVALID_STATE) {
         cap_session_mgr_write_format(output,
                                      output_size,
+                                     chinese ? "当前会话 %s 正在使用，请先切换到其他会话。" :
                                      "Cannot delete the current session \"%s\". Switch to another session first.",
                                      alias);
         return ESP_OK;
     }
     if (command == CAP_SESSION_MGR_CMD_DELETE && err == ESP_ERR_NOT_SUPPORTED) {
-        cap_session_mgr_write_message(output,
-                                      output_size,
+        cap_session_mgr_write_message(output, output_size, chinese ?
+                                      "设备暂时无法删除会话历史。" :
                                       "Session command failed: session history deletion is unavailable.");
         return ESP_OK;
     }
     if (err == ESP_ERR_INVALID_STATE) {
-        cap_session_mgr_write_message(output, output_size, "Session command failed: session manager is not configured.");
+        cap_session_mgr_write_message(output, output_size, chinese ?
+                                      "会话管理尚未配置。" :
+                                      "Session command failed: session manager is not configured.");
         ESP_LOGW(TAG, "Session manager command called before configuration");
         return ESP_OK;
     }
@@ -414,6 +451,7 @@ static esp_err_t cap_session_mgr_command_execute(cap_session_mgr_command_t comma
                                             ctx,
                                             has_alias ? alias : NULL,
                                             err,
+                                            chinese,
                                             output,
                                             output_size);
         return ESP_OK;
@@ -421,12 +459,15 @@ static esp_err_t cap_session_mgr_command_execute(cap_session_mgr_command_t comma
 
     if (command == CAP_SESSION_MGR_CMD_NEW) {
         ESP_LOGI(TAG, "Created chat session %s:%s alias=%s", ctx->channel, ctx->chat_id, result_alias);
-        cap_session_mgr_write_format(output, output_size, "Started a new session: %s", result_alias);
+        cap_session_mgr_write_format(output, output_size, chinese ?
+                                     "已创建并切换到会话 %s。" : "Started a new session: %s", result_alias);
     } else if (command == CAP_SESSION_MGR_CMD_SWITCH) {
         ESP_LOGI(TAG, "Switched chat session %s:%s alias=%s", ctx->channel, ctx->chat_id, result_alias);
-        cap_session_mgr_write_format(output, output_size, "Switched to session: %s", result_alias);
+        cap_session_mgr_write_format(output, output_size, chinese ?
+                                     "已切换到会话 %s。" : "Switched to session: %s", result_alias);
     } else if (command == CAP_SESSION_MGR_CMD_DELETE) {
-        cap_session_mgr_write_format(output, output_size, "Deleted session: %s", result_alias);
+        cap_session_mgr_write_format(output, output_size, chinese ?
+                                     "已删除会话 %s。" : "Deleted session: %s", result_alias);
     }
 
     return ESP_OK;
@@ -439,10 +480,12 @@ static esp_err_t cap_session_mgr_session_execute(const char *input_json,
 {
     char command_text[96];
     const char *effective_command = command_text;
+    bool chinese = ctx && ctx->source_cap && strcmp(ctx->source_cap, "claw_event_router") == 0 &&
+                   ctx->chat_id && ctx->chat_id[0];
     cap_session_mgr_parsed_command_t parsed;
     esp_err_t err;
 
-    err = cap_session_mgr_read_command_input(input_json, command_text, sizeof(command_text));
+    err = cap_session_mgr_read_command_input(input_json, command_text, sizeof(command_text), &chinese);
     if (err == ESP_OK) {
         /* 命令前缀归一化：同时接受完整写法与简写。
          * 官方 FAQ 让用户发 "/new"，但解析器只认裸子命令，这里补齐映射：
@@ -462,7 +505,7 @@ static esp_err_t cap_session_mgr_session_execute(const char *input_json,
     }
     if (err != ESP_OK ||
             cap_session_mgr_parse_session_command(effective_command, &parsed) != ESP_OK) {
-        cap_session_mgr_write_message(output, output_size, s_session_mgr_usage);
+        cap_session_mgr_write_message(output, output_size, chinese ? s_session_mgr_usage_zh : s_session_mgr_usage_en);
         return ESP_OK;
     }
 
@@ -470,6 +513,7 @@ static esp_err_t cap_session_mgr_session_execute(const char *input_json,
                                            parsed.has_alias ? parsed.alias : NULL,
                                            parsed.has_alias,
                                            ctx,
+                                           chinese,
                                            output,
                                            output_size);
 }
@@ -482,7 +526,8 @@ static const claw_cap_descriptor_t s_session_mgr_caps[] = {
         .description = "Handle consolidated /session chat commands.",
         .kind = CLAW_CAP_KIND_CALLABLE,
         .cap_flags = CLAW_CAP_FLAG_RESTRICTED,
-        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}}}",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"},"
+                             "\"language\":{\"type\":\"string\",\"enum\":[\"en\",\"zh-cn\"]}}}",
         .execute = cap_session_mgr_session_execute,
     },
 };
