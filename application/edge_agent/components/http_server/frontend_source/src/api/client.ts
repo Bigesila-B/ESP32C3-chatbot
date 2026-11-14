@@ -10,6 +10,7 @@ export type AppConfig = {
   ap_ssid: string;
   ap_password: string;
   ap_behavior: string;
+  show_tool_progress: string;
   llm_api_key: string;
   llm_backend_type: string;
   llm_model: string;
@@ -45,7 +46,7 @@ export type AppConfig = {
 
 /** Server-side configuration groups (must stay in sync with
  * CONFIG_FIELDS in http_server_config_api.c). */
-export type ConfigGroup = 'wifi' | 'llm' | 'im' | 'search' | 'mcp' | 'capabilities' | 'skills' | 'time';
+export type ConfigGroup = 'wifi' | 'llm' | 'im' | 'search' | 'mcp' | 'capabilities' | 'skills' | 'time' | 'chat';
 
 export const GROUP_FIELDS: Record<ConfigGroup, (keyof AppConfig)[]> = {
   wifi: ['wifi_ssid', 'wifi_password', 'ap_ssid', 'ap_password', 'ap_behavior'],
@@ -81,6 +82,7 @@ export const GROUP_FIELDS: Record<ConfigGroup, (keyof AppConfig)[]> = {
   capabilities: ['enabled_cap_groups', 'llm_visible_cap_groups'],
   skills: ['enabled_lua_modules'],
   time: ['time_timezone'],
+  chat: ['show_tool_progress'],
 };
 
 export function blankConfig(): Partial<AppConfig> {
@@ -458,6 +460,16 @@ export type ChatHelpSnapshot = {
 
 export function fetchChatHelp(signal?: AbortSignal) {
   return request<ChatHelpSnapshot>('/api/chat/help', { signal }, 'Failed to load chat commands');
+}
+
+export type SkillCatalogItem = {
+  id: string;
+  summary: string;
+  unavailable_groups: string[];
+};
+
+export function fetchSkillCatalog() {
+  return request<{ skills: SkillCatalogItem[] }>('/api/skills', undefined, 'Failed to load Skills');
 }
 
 export type WebImStatusResponse = {

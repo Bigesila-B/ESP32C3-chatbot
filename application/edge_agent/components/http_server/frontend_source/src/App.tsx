@@ -36,6 +36,9 @@ const CapabilitiesPage = lazy(() =>
 const SkillsPage = lazy(() =>
   import('./pages/SkillsPage').then((mod) => ({ default: mod.SkillsPage })),
 );
+const SkillCatalogPage = lazy(() =>
+  import('./pages/SkillCatalogPage').then((mod) => ({ default: mod.SkillCatalogPage })),
+);
 const FilesPage = lazy(() =>
   import('./pages/FilesPage').then((mod) => ({ default: mod.FilesPage })),
 );
@@ -274,6 +277,9 @@ const App: Component = () => {
                 <CapabilitiesPage
                   onRestartRequest={() => void handleRestartRequest({ reloadOnSuccess: true })}
                 />
+              </Show>
+              <Show when={currentTab() === 'skill-catalog'}>
+                <SkillCatalogPage />
               </Show>
               <Show when={currentTab() === 'skills'}>
                 <SkillsPage

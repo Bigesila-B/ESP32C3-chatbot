@@ -26,9 +26,18 @@ export const zhCn: Dict = {
   navCommands: '指令列表',
   navMemory: '记忆管理',
   navCapabilities: 'Capabilities 管理',
+  navSkillCatalog: '技能列表',
   navLuaModules: 'Lua 模块管理',
   navFiles: '文件管理',
   navWebIm: '在线聊天',
+
+  skillCatalogDescription: '查看设备已加载的内置和自定义 Skills。',
+  skillCatalogFailed: '无法读取技能列表，请稍后刷新。',
+  skillCatalogEmpty: '设备还没有加载任何 Skill。',
+  skillCatalogPython: '在 ESP32-S3 上运行小型 MicroPython 脚本。脚本可接收 JSON 参数，并通过 print() 返回结果。',
+  skillCatalogUnavailable: '所需工具组尚未启用或未编入固件（{groups}）',
+  skillCatalogUseChat: '使用时，在聊天中说明要完成的任务或指定 Skill 名称。',
+  skillCatalogFiles: '自定义 Skill 的 SKILL.md 和脚本放入 /skills 下的同名目录，上传后重启设备或注册 Skill。',
 
   webimDesc: '通过 WebSocket 与 ESP-Claw 实时互动。',
   webimSend: '发送',
@@ -63,6 +72,9 @@ export const zhCn: Dict = {
   restartHint: '保存后推荐重启设备以应用新设置',
 
   sectionWifi: 'Wi-Fi 设置',
+  sectionChat: '聊天回复',
+  showToolProgress: '显示工具调用过程',
+  showToolProgressHint: '开启后会在聊天中发送工具调用进度。保存即生效。',
   wifiSsid: 'Wi-Fi 名称 (SSID)',
   wifiPassword: 'Wi-Fi 密码',
   passwordShow: '显示密码',

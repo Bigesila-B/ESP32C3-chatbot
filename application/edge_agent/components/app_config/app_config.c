@@ -70,6 +70,7 @@ static const app_config_field_t s_fields[] = {
     APP_CONFIG_FIELD(ap_ssid, "ap_ssid", ""),
     APP_CONFIG_FIELD(ap_password, "ap_password", ""),
     APP_CONFIG_FIELD(ap_behavior, "ap_behavior", "keep"),
+    APP_CONFIG_FIELD(show_tool_progress, "show_tool_prog", "false"),
     APP_CONFIG_FIELD(llm_api_key, "llm_api_key", APP_DEFAULT_LLM_API_KEY),
     APP_CONFIG_FIELD(llm_backend_type, "llm_backend", APP_DEFAULT_LLM_BACKEND_TYPE),
     APP_CONFIG_FIELD(llm_model, "llm_model", APP_DEFAULT_LLM_MODEL),
@@ -549,6 +550,11 @@ esp_err_t app_config_validate_wifi(const app_config_t *config, const char **mess
         return ESP_ERR_INVALID_ARG;
     }
     return ESP_OK;
+}
+
+bool app_config_show_tool_progress(const app_config_t *config)
+{
+    return strcmp(config->show_tool_progress, "true") == 0 || strcmp(config->show_tool_progress, "1") == 0;
 }
 
 void app_config_to_claw(const app_config_t *config, app_claw_config_t *out)

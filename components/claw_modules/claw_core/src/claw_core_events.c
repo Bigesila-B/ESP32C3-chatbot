@@ -6,6 +6,7 @@
 #include "claw_core_internal.h"
 
 #include <inttypes.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +19,17 @@
 static const char *TAG = "claw_core";
 
 #define CLAW_CORE_STAGE_REASONING_SNIPPET_LEN 150
+
+#if CONFIG_CLAW_CORE_STAGE_VERBOSITY_VERBOSE
+static atomic_bool s_tool_progress_enabled = true;
+#else
+static atomic_bool s_tool_progress_enabled;
+#endif
+
+void claw_core_set_tool_progress_enabled(bool enabled)
+{
+    atomic_store(&s_tool_progress_enabled, enabled);
+}
 
 static esp_err_t build_response_payload_json(const claw_core_request_t *request,
                                              const claw_core_response_t *response,
@@ -223,13 +235,12 @@ void claw_core_publish_stage_tool_calls(const claw_core_request_t *request,
                                         const claw_core_llm_response_t *response,
                                         uint32_t iteration)
 {
-#if CONFIG_CLAW_CORE_STAGE_VERBOSITY_VERBOSE
     char buf[256];
     size_t off = 0;
     size_t i;
     int written;
 
-    if (!response) {
+    if (!response || !atomic_load(&s_tool_progress_enabled)) {
         return;
     }
 
@@ -280,11 +291,6 @@ void claw_core_publish_stage_tool_calls(const claw_core_request_t *request,
     }
 
     (void)claw_core_publish_stage_text(request, buf);
-#else
-    (void)request;
-    (void)response;
-    (void)iteration;
-#endif
 }
 
 void claw_core_publish_stage_note_for_round(claw_core_state_t *core,
@@ -305,11 +311,10 @@ void claw_core_publish_stage_note_for_round(claw_core_state_t *core,
         return;
     }
 
-#if CONFIG_CLAW_CORE_STAGE_VERBOSITY_VERBOSE
     char buf[256];
     int written;
 
-    if (!stage_note || !stage_note[0]) {
+    if (!stage_note || !stage_note[0] || !atomic_load(&s_tool_progress_enabled)) {
         free(stage_note);
         return;
     }
@@ -320,9 +325,5 @@ void claw_core_publish_stage_note_for_round(claw_core_state_t *core,
         return;
     }
     (void)claw_core_publish_stage_text(request, buf);
-#else
-    (void)request;
-    (void)round_index;
-#endif
     free(stage_note);
 }

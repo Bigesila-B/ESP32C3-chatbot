@@ -2,13 +2,14 @@ import { createEffect, createSignal, Show, type Component } from 'solid-js';
 import { currentLocale, t, tf } from '../i18n';
 import type { AppConfig } from '../api/client';
 import { createConfigTab } from '../state/configTab';
-import { appStatus } from '../state/config';
+import { appConfig, appStatus } from '../state/config';
 import { TabShell } from '../components/layout/TabShell';
 import { PageHeader } from '../components/ui/PageHeader';
 import { CollapsibleConfigBlock, StaticConfigBlock } from '../components/ui/ConfigBlocks';
 import { TextInput, SelectInput } from '../components/ui/FormField';
 import { SavePanel } from '../components/ui/SavePanel';
 import { Banner } from '../components/ui/Banner';
+import { Switch } from '../components/ui/Switch';
 import { RestartConfirmModal } from '../components/system/RestartConfirmModal';
 import { pushToast } from '../state/toast';
 
@@ -19,12 +20,13 @@ type BasicForm = {
   ap_password: string;
   ap_behavior: string;
   time_timezone: string;
+  show_tool_progress: boolean;
 };
 
 export const BasicPage: Component<{ onRestartRequest: () => void }> = (props) => {
   const tab = createConfigTab<BasicForm>({
     tab: 'basic',
-    groups: ['wifi', 'time'],
+    groups: ['wifi', 'time', 'chat'],
     toForm: (config: Partial<AppConfig>) => ({
       wifi_ssid: config.wifi_ssid ?? '',
       wifi_password: config.wifi_password ?? '',
@@ -32,6 +34,7 @@ export const BasicPage: Component<{ onRestartRequest: () => void }> = (props) =>
       ap_password: config.ap_password ?? '',
       ap_behavior: config.ap_behavior ?? 'keep',
       time_timezone: config.time_timezone ?? '',
+      show_tool_progress: config.show_tool_progress === 'true' || config.show_tool_progress === '1',
     }),
     fromForm: (form) => ({
       wifi_ssid: form.wifi_ssid.trim(),
@@ -40,6 +43,7 @@ export const BasicPage: Component<{ onRestartRequest: () => void }> = (props) =>
       ap_password: form.ap_password,
       ap_behavior: form.ap_behavior,
       time_timezone: form.time_timezone.trim(),
+      show_tool_progress: String(form.show_tool_progress),
     }),
   });
   const [validationError, setValidationError] = createSignal<string | null>(null);
@@ -54,6 +58,7 @@ export const BasicPage: Component<{ onRestartRequest: () => void }> = (props) =>
   });
 
   const handleSave = async () => {
+    if (tab.loading() || tab.saving()) return;
     const wifiSsid = tab.form.wifi_ssid.trim();
     const wifiPassword = tab.form.wifi_password;
     const apPassword = tab.form.ap_password;
@@ -79,8 +84,15 @@ export const BasicPage: Component<{ onRestartRequest: () => void }> = (props) =>
       return;
     }
 
+    const needsRestart =
+      wifiSsid !== (appConfig().wifi_ssid ?? '').trim() ||
+      wifiPassword !== (appConfig().wifi_password ?? '') ||
+      tab.form.ap_ssid.trim() !== (appConfig().ap_ssid ?? '').trim() ||
+      apPassword !== (appConfig().ap_password ?? '') ||
+      tab.form.ap_behavior !== (appConfig().ap_behavior ?? 'keep') ||
+      tab.form.time_timezone.trim() !== (appConfig().time_timezone ?? '').trim();
     await tab.save();
-    setConfirmOpen(true);
+    if (needsRestart) setConfirmOpen(true);
   };
 
   const currentApSsid = () => appStatus()?.ap_ssid ?? '';
@@ -111,13 +123,22 @@ export const BasicPage: Component<{ onRestartRequest: () => void }> = (props) =>
 
   return (
     <TabShell>
-      <PageHeader title={t('navBasic') as string} description={t('restartHint') as string} />
+      <PageHeader title={t('navBasic') as string} />
       <Show when={validationError() ?? tab.error()}>
         <div class="px-5 pt-4">
           <Banner kind="error" message={validationError() ?? tab.error() ?? undefined} />
         </div>
       </Show>
       <div class="divide-y divide-[var(--color-border-subtle)] mt-2">
+        <StaticConfigBlock title={t('sectionChat') as string}>
+          <Switch
+            checked={tab.form.show_tool_progress}
+            disabled={tab.loading() || tab.saving()}
+            label={t('showToolProgress')}
+            hint={t('showToolProgressHint')}
+            onChange={(checked) => tab.setForm('show_tool_progress', checked)}
+          />
+        </StaticConfigBlock>
         <StaticConfigBlock title={t('sectionWifi') as string}>
           <div class="grid gap-3 sm:grid-cols-2 pt-2">
             <TextInput
@@ -176,7 +197,6 @@ export const BasicPage: Component<{ onRestartRequest: () => void }> = (props) =>
         saving={tab.saving()}
         onSave={() => handleSave().catch(() => undefined)}
         onDiscard={tab.discard}
-        note={t('restartHint') as string}
       />
       <RestartConfirmModal
         open={confirmOpen()}

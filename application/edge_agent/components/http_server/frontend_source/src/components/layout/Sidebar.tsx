@@ -10,6 +10,7 @@ import {
   Plug,
   Search,
   Settings,
+  Sparkles,
   SquareFunction,
   WifiPen,
 } from 'lucide-solid';
@@ -30,6 +31,7 @@ const IconMcp: Component = () => <Plug class={iconClass} />;
 const IconCommands: Component = () => <List class={iconClass} />;
 const IconMemory: Component = () => <DatabaseZap class={iconClass} />;
 const IconCaps: Component = () => <Blocks class={iconClass} />;
+const IconSkillCatalog: Component = () => <Sparkles class={iconClass} />;
 const IconSkills: Component = () => <SquareFunction class={iconClass} />;
 const IconFiles: Component = () => <Folder class={iconClass} />;
 const IconWebIm: Component = () => <MessagesSquare class={iconClass} />;
@@ -47,6 +49,7 @@ export type LeafNode = {
     | 'navCommands'
     | 'navMemory'
     | 'navCapabilities'
+    | 'navSkillCatalog'
     | 'navLuaModules'
     | 'navFiles'
     | 'navWebIm';
@@ -80,6 +83,7 @@ export const NAV_TREE: NavNode[] = [
   { kind: 'leaf', id: 'memory', labelKey: 'navMemory', icon: IconMemory },
   { kind: 'leaf', id: 'webim', labelKey: 'navWebIm', icon: IconWebIm },
   { kind: 'leaf', id: 'capabilities', labelKey: 'navCapabilities', icon: IconCaps },
+  { kind: 'leaf', id: 'skill-catalog', labelKey: 'navSkillCatalog', icon: IconSkillCatalog },
   { kind: 'leaf', id: 'skills', labelKey: 'navLuaModules', icon: IconSkills },
   { kind: 'leaf', id: 'files', labelKey: 'navFiles', icon: IconFiles },
 ];

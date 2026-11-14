@@ -85,6 +85,7 @@ static const config_field_def_t CONFIG_FIELDS[] = {
     CONFIG_FIELD("skills",       enabled_lua_modules),
 
     CONFIG_FIELD("time",         time_timezone),
+    CONFIG_FIELD("chat",         show_tool_progress),
 };
 
 static const size_t CONFIG_FIELD_COUNT = sizeof(CONFIG_FIELDS) / sizeof(CONFIG_FIELDS[0]);
@@ -352,7 +353,8 @@ static esp_err_t config_post_handler(httpd_req_t *req)
                                                "llm_default_image_max_bytes must be a positive integer");
             }
         }
-        if ((strcmp(field->name, "llm_supports_tools") == 0 ||
+        if ((strcmp(field->name, "show_tool_progress") == 0 ||
+                strcmp(field->name, "llm_supports_tools") == 0 ||
                 strcmp(field->name, "llm_supports_vision") == 0 ||
                 strcmp(field->name, "llm_image_remote_url_only") == 0) &&
                 !is_boolean_string(item->valuestring)) {
@@ -360,7 +362,7 @@ static esp_err_t config_post_handler(httpd_req_t *req)
             free(config);
             return httpd_resp_send_err(req,
                                        HTTPD_400_BAD_REQUEST,
-                                       "LLM boolean fields must be true/false");
+                                       "Boolean fields must be true/false");
         }
         strlcpy(field_mutable(config, field), item->valuestring, field->size);
         applied_count++;

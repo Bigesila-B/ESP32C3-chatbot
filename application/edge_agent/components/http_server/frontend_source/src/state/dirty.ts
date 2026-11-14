@@ -12,6 +12,7 @@ export type TabId =
   | 'memory'
   | 'webim'
   | 'capabilities'
+  | 'skill-catalog'
   | 'skills'
   | 'files';
 
@@ -26,6 +27,7 @@ const [dirtyTabs, setDirtyTabs] = createSignal<Record<TabId, boolean>>({
   memory: false,
   webim: false,
   capabilities: false,
+  'skill-catalog': false,
   skills: false,
   files: false,
 });

@@ -24,9 +24,18 @@ export const en = {
   navCommands: 'Chat Commands',
   navMemory: 'Memory',
   navCapabilities: 'Capabilities',
+  navSkillCatalog: 'Skills',
   navLuaModules: 'Lua Modules',
   navFiles: 'Files',
   navWebIm: 'Web Chat',
+
+  skillCatalogDescription: 'View the built-in and custom Skills loaded on this device.',
+  skillCatalogFailed: 'Could not load the Skills list. Try refreshing.',
+  skillCatalogEmpty: 'This device has no loaded Skills.',
+  skillCatalogPython: 'Run small MicroPython scripts on the ESP32-S3. Scripts can accept JSON arguments and return results with print().',
+  skillCatalogUnavailable: 'Required tool groups are disabled or absent from the firmware ({groups})',
+  skillCatalogUseChat: 'To use a Skill, describe your task or name it in chat.',
+  skillCatalogFiles: 'Put SKILL.md and scripts in a matching folder under /skills, then restart the device or register the Skill.',
 
   webimDesc: 'Interact with ESP-Claw in real time via WebSocket.',
   webimSend: 'Send',
@@ -62,6 +71,9 @@ export const en = {
   restartHint: 'Restart the device after saving to apply new settings',
 
   sectionWifi: 'Wi-Fi Settings',
+  sectionChat: 'Chat replies',
+  showToolProgress: 'Show tool-call progress',
+  showToolProgressHint: 'Send tool-call progress messages in chat. Takes effect when saved.',
   wifiSsid: 'Wi-Fi SSID',
   wifiPassword: 'Wi-Fi Password',
   passwordShow: 'Show password',

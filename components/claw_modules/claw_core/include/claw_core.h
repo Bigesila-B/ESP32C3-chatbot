@@ -193,6 +193,7 @@ esp_err_t claw_core_add_context_provider(claw_core_handle_t core,
 esp_err_t claw_core_add_completion_observer(claw_core_handle_t core,
                                             claw_core_completion_observer_fn observer,
                                             void *user_ctx);
+void claw_core_set_tool_progress_enabled(bool enabled);
 esp_err_t claw_core_publish_stage_text(const claw_core_request_t *request, const char *text);
 esp_err_t claw_core_submit(claw_core_handle_t core,
                            const claw_core_request_t *request,
