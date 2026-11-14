@@ -1305,7 +1305,8 @@ cleanup:
             ESP_LOGE(TAG, "reset session history %s failed: %s",
                      data_path,
                      esp_err_to_name(reset_err));
-            err = reset_err;
+            /* There is no readable history. Let the current turn continue even
+             * when storage cannot save the replacement pair. */
         }
     }
     session_history_index_free(&index);

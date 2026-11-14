@@ -160,6 +160,15 @@ static esp_err_t file_download_handler(httpd_req_t *req)
     return httpd_resp_send_chunk(req, NULL, 0);
 }
 
+static esp_err_t files_upload_write_error(httpd_req_t *req, int write_errno)
+{
+    if (write_errno == ENOSPC) {
+        httpd_resp_set_status(req, "507 Insufficient Storage");
+        return httpd_resp_sendstr(req, "Device storage is full");
+    }
+    return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Upload failed");
+}
+
 static esp_err_t files_upload_handler(httpd_req_t *req)
 {
     char relative_path[HTTP_SERVER_PATH_MAX] = {0};
@@ -190,7 +199,7 @@ static esp_err_t files_upload_handler(httpd_req_t *req)
 
     FILE *file = fopen(full_path, "wb");
     if (!file) {
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to create file");
+        return files_upload_write_error(req, errno);
     }
 
     char *scratch = http_server_alloc_scratch_buffer();
@@ -205,17 +214,23 @@ static esp_err_t files_upload_handler(httpd_req_t *req)
     while (remaining > 0) {
         int chunk = remaining > HTTP_SERVER_SCRATCH_SIZE ? HTTP_SERVER_SCRATCH_SIZE : remaining;
         int received = httpd_req_recv(req, scratch, chunk);
+        errno = 0;
         if (received <= 0 || fwrite(scratch, 1, received, file) != (size_t)received) {
+            int write_errno = errno;
             free(scratch);
             fclose(file);
             unlink(full_path);
-            return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Upload failed");
+            return files_upload_write_error(req, write_errno);
         }
         remaining -= received;
     }
 
     free(scratch);
-    fclose(file);
+    if (fclose(file) != 0) {
+        int write_errno = errno;
+        unlink(full_path);
+        return files_upload_write_error(req, write_errno);
+    }
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store, max-age=0");
     return httpd_resp_sendstr(req, "{\"ok\":true}");

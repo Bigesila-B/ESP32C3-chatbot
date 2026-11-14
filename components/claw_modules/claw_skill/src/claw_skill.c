@@ -456,12 +456,12 @@ static esp_err_t write_file_text(const char *path, const char *text)
         ESP_LOGE(TAG, "write open: %s", path);
         return ESP_FAIL;
     }
-    if (fputs(text, file) < 0) {
-        ESP_LOGE(TAG, "write fail: %s", path);
-        fclose(file);
+    bool written = fputs(text, file) >= 0;
+    /* Buffered writes can fail on close when the data partition is full. */
+    if (fclose(file) != 0 || !written) {
+        ESP_LOGE(TAG, "write or close failed: %s", path);
         return ESP_FAIL;
     }
-    fclose(file);
     return ESP_OK;
 }
 
@@ -1328,6 +1328,11 @@ static esp_err_t load_active_skill_ids_from_disk(const char *session_id,
     /* Session state file may not exist for new sessions — that is normal. */
     struct stat st = {0};
     if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
+        free(path);
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (st.st_size == 0) {
+        /* A failed first write can leave an empty file with no saved skills. */
         free(path);
         return ESP_ERR_NOT_FOUND;
     }
