@@ -143,46 +143,54 @@ pnpm run build
 
 ---
 
+### 3.4 聊天指令列表和 token 用量
+
+主实现位于 `application/edge_agent/components/app_chat_help/`，前端页面为 `ChatHelpPage.tsx`。Web 的 `/api/chat/help` 和聊天中的 `/help` 读取同一份指令来源。设备读取启用的斜杠路由，借用现有 `session_command` 和 `llm_config_command` 的帮助输出列出子指令。
+
+同步新版时可以从 `upstream/master` 建一个本地验证分支，先迁移依赖的定制提交，再 `git cherry-pick` 聊天指令提交。按新版接口对照下表接入。
+
+| 上游入口 | 接入内容 |
+|---|---|
+| `claw_event_router` | 注册一个可消费聊天消息的回调，回复沿用已有 IM 出站绑定。无需给用户已有的路由 JSON 添加规则。 |
+| `claw_llm_http_post_json()` | 在一次成功的 LLM 响应交给后端解析前，将响应体交给用量统计。这个入口覆盖对话、工具循环、视觉和记忆的模型请求。 |
+| `edge_agent/main.c` | 设置时区并初始化 NVS 后启动统计，Agent 启动后注册聊天回调。 |
+| `http_server` 和前端导航 | 挂载 `/api/chat/help` 和指令列表页。旧 Web IM 从 WebSocket 消息的 `kind` 渲染回复图标。新版 `http_server_webim_send_session()` 直接提交 Agent 请求，需在该入口提交前处理 `/help`，再由会话聊天页面渲染帮助回复和 favicon。 |
+| `cap_session_mgr` 和 `cap_llm_config` | 用各自已有的用法说明维护子指令和别名。单独运行 `/session` 或 `/llm` 时也会显示这些说明。 |
+
+用量用设备时区分日、分月累计，只计模型响应中的真实用量。NVS 命名空间为 `claw_usage`，键为 `totals_v1`。换基线时保留此记录格式，或迁移旧值。生成前端资源后重新构建固件。回归时检查网页指令和 `/help` 一致、`/help` 不触发模型请求、普通对话增加计数、重启后统计可读。
+
+以官方 `50072775` 为基线做过三方合并检查。独立组件、事件路由和模型 HTTP 入口可自动合并。Web 会话接入、菜单和文案、主程序初始化、模型命令帮助需要按新版接口合并。`dist/index.html.gz` 随新版源码重新生成。
+
 ## 4. 同步官方更新
 
 ### 一次性配置
 
 ```bash
 git remote add upstream https://github.com/espressif/esp-claw.git
-git fetch upstream
 ```
 
-### 每次同步（推荐流程）
+### 在独立工作区验证新版
 
 ```bash
-# 1. 更新 master 到官方最新（只快进，不产生本地提交）
 git fetch upstream
-git checkout master
-git merge --ff-only upstream/master
-git push origin master
-
-# 2. 把定制功能迁移到新基线
-git checkout feature/context-compaction
-git rebase master
-
-# 3. 解决冲突（见下节），编译验证
-# 4. 强制推送分支（rebase 会改写历史）
-git push --force-with-lease origin feature/context-compaction
+git worktree add -b upgrade/esp-claw ../esp-claw-upgrade upstream/master
+cd ../esp-claw-upgrade
+git log --oneline --reverse upstream/master..local/chat-help
 ```
 
-`--force-with-lease` 比 `--force` 安全：远端有人改过会拒绝推送。
+用 `git cherry-pick <提交>` 按顺序迁移仍需要的本地功能。根据第 3 节核对新版入口，重新构建前端和固件，再用测试设备验证。原有工作区和分支仍可用于回退。
 
 ---
 
 ## 5. 迁移冲突处理
 
-rebase 冲突几乎一定集中在 **`claw_memory_session.c`**，因为它是上游演进最活跃的文件之一。
+迁移上下文压缩时，优先对照新版 **`claw_memory_session.c`** 的记录格式和压缩逻辑。
 
 **处理顺序：**
 
 1. **先保留上游版本，再整块插入新增函数。**
-   `git checkout --theirs`（rebase 时 theirs 是上游）拿到上游版本，然后把
-   第 3.1 节列的那一整块新函数插入到 `session_history_analyze_turns()` 之后。
+   在 `cherry-pick` 发生冲突时，可以用 `git show HEAD:<文件路径>` 查看目标分支版本。
+   若新版仍保留相同的会话存储接口，可把第 3.1 节的新函数接到 `session_history_analyze_turns()` 之后。
 
 2. **逐个改 3 个函数，不要重写。**
    - `session_history_compact_keep_record()`：只改 `return true` 那一行为窗口判断
@@ -190,13 +198,13 @@ rebase 冲突几乎一定集中在 **`claw_memory_session.c`**，因为它是上
      触发判断和追加摘要步骤
    - `claw_memory_session_history_collect()`：只在返回前插入摘要注入
 
-3. **其他 12 个文件基本都是"加几行"，冲突概率很低。**
-   如果上游改了字段顺序，按名字对齐即可，不要按行号。
+3. **核对相关配置字段。**
+   上游字段顺序变化时按字段名对齐。
 
 **判断上游是否重构了相关逻辑：**
 
 ```bash
-git log master --oneline -- components/claw_modules/claw_memory/src/claw_memory_session.c | head -20
+git log -20 upstream/master --oneline -- components/claw_modules/claw_memory/src/claw_memory_session.c
 ```
 
 如果上游已经把压缩改成基于 token 或加了摘要功能，那么 3.1 的定制就可以**整体废弃**，

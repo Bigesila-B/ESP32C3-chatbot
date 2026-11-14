@@ -18,6 +18,7 @@ static const char *TAG = "cap_session_mgr";
 
 static const char *s_session_mgr_usage =
     "Usage:\n"
+    "/session                  Show session commands\n"
     "/session new [name]       Create and switch to a new session\n"
     "/session list             List sessions in this chat\n"
     "/session switch <name>    Switch to an existing session\n"

@@ -4,6 +4,7 @@ import {
   Bot,
   DatabaseZap,
   Folder,
+  List,
   MessageSquareCode,
   MessagesSquare,
   Plug,
@@ -26,6 +27,7 @@ const IconLlm: Component = () => <Bot class={iconClass} />;
 const IconIm: Component = () => <MessageSquareCode class={iconClass} />;
 const IconSearch: Component = () => <Search class={iconClass} />;
 const IconMcp: Component = () => <Plug class={iconClass} />;
+const IconCommands: Component = () => <List class={iconClass} />;
 const IconMemory: Component = () => <DatabaseZap class={iconClass} />;
 const IconCaps: Component = () => <Blocks class={iconClass} />;
 const IconSkills: Component = () => <SquareFunction class={iconClass} />;
@@ -42,6 +44,7 @@ export type LeafNode = {
     | 'navIm'
     | 'navWebReq'
     | 'navMcp'
+    | 'navCommands'
     | 'navMemory'
     | 'navCapabilities'
     | 'navLuaModules'
@@ -71,6 +74,7 @@ export const NAV_TREE: NavNode[] = [
       { kind: 'leaf', id: 'im', labelKey: 'navIm', icon: IconIm },
       { kind: 'leaf', id: 'webreq', labelKey: 'navWebReq', icon: IconSearch },
       { kind: 'leaf', id: 'mcp', labelKey: 'navMcp', icon: IconMcp },
+      { kind: 'leaf', id: 'commands', labelKey: 'navCommands', icon: IconCommands },
     ],
   },
   { kind: 'leaf', id: 'memory', labelKey: 'navMemory', icon: IconMemory },

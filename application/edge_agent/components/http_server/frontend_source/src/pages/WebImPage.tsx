@@ -24,6 +24,7 @@ import { Banner } from '../components/ui/Banner';
 import { Switch } from '../components/ui/Switch';
 import { t } from '../i18n';
 import { pushToast } from '../state/toast';
+import { ChatHelpMessage } from '../components/webim/ChatHelpMessage';
 
 const LS_CHAT_ID = 'esp-claw-webim-chat-id';
 const MARKED_CDN_URL = 'https://esp-claw.com/clientjs/marked@18.0.4/marked.umd.min.js';
@@ -326,7 +327,8 @@ export const WebImPage: Component = () => {
           };
         });
       }
-      setMessages((prev) => [...prev, { seq, role: 'assistant', text, ts_ms, links }]);
+      const kind = data.kind === 'chat_help' ? 'chat_help' : undefined;
+      setMessages((prev) => [...prev, { seq, role: 'assistant', text, kind, ts_ms, links }]);
     };
   };
 
@@ -527,7 +529,12 @@ export const WebImPage: Component = () => {
                         : 'bg-white/6 text-[var(--color-text-primary)]',
                     ].join(' ')}
                   >
-                    <MarkdownMessage preview={markdownPreview()} text={m.text} />
+                    <Show
+                      when={m.kind === 'chat_help'}
+                      fallback={<MarkdownMessage preview={markdownPreview()} text={m.text} />}
+                    >
+                      <ChatHelpMessage text={m.text} />
+                    </Show>
                     <Show when={(m.links?.length ?? 0) > 0}>
                       <ul class="mt-2 space-y-1 list-none m-0 p-0">
                         <For each={m.links ?? []}>

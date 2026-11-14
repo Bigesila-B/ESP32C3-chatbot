@@ -433,9 +433,32 @@ export type WebImMessage = {
   seq: number;
   role: string;
   text: string;
+  kind?: 'chat_help';
   ts_ms?: number;
   links?: WebImLink[];
 };
+
+export type ChatHelpPeriod = { tokens: number; reported: number; unreported: number };
+
+export type ChatHelpSnapshot = {
+  ready: boolean;
+  date: string;
+  ip: string;
+  cpu_percent: number | null;
+  internal_total: number;
+  internal_free: number;
+  psram_total: number;
+  psram_free: number;
+  usage_available: boolean;
+  usage_durable: boolean;
+  today: ChatHelpPeriod;
+  month: ChatHelpPeriod;
+  commands: Array<{ command: string; description: string; channel: string }>;
+};
+
+export function fetchChatHelp(signal?: AbortSignal) {
+  return request<ChatHelpSnapshot>('/api/chat/help', { signal }, 'Failed to load chat commands');
+}
 
 export type WebImStatusResponse = {
   ok?: boolean;

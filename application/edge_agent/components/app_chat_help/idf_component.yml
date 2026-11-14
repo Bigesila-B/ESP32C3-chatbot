@@ -1,0 +1,6 @@
+dependencies:
+  espressif/cjson:
+    version: "^1.7.19"
+    public: true
+  wifi_manager:
+    path: ../../../../components/common/wifi_manager

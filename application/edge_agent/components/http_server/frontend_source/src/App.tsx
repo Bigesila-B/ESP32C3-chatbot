@@ -22,6 +22,9 @@ const WebReqPage = lazy(() =>
   import('./pages/WebReqPage').then((mod) => ({ default: mod.WebReqPage })),
 );
 const McpPage = lazy(() => import('./pages/McpPage').then((mod) => ({ default: mod.McpPage })));
+const ChatHelpPage = lazy(() =>
+  import('./pages/ChatHelpPage').then((mod) => ({ default: mod.ChatHelpPage })),
+);
 const MemoryPage = lazy(() =>
   import('./pages/MemoryPage').then((mod) => ({ default: mod.MemoryPage })),
 );
@@ -257,6 +260,9 @@ const App: Component = () => {
               </Show>
               <Show when={currentTab() === 'mcp'}>
                 <McpPage />
+              </Show>
+              <Show when={currentTab() === 'commands'}>
+                <ChatHelpPage />
               </Show>
               <Show when={currentTab() === 'memory'}>
                 <MemoryPage />

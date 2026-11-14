@@ -108,6 +108,11 @@ esp_err_t claw_event_router_purge_queue(const char *event_type_filter,
                                         size_t *out_cancelled);
 esp_err_t claw_event_router_register_outbound_binding(const char *channel,
                                                       const char *cap_name);
+/* Return false to continue through the normal rules. For a consumed message,
+ * put the reply status in out_status. */
+typedef bool (*claw_event_router_chat_command_fn)(const claw_event_t *event, esp_err_t *out_status);
+esp_err_t claw_event_router_set_chat_command_handler(claw_event_router_chat_command_fn handler);
+esp_err_t claw_event_router_reply(const claw_event_t *event, const char *message);
 esp_err_t claw_event_router_handle_event(const claw_event_t *event,
                                          claw_event_router_result_t *out_result);
 esp_err_t claw_event_router_list_rules(claw_event_router_rule_t **out_rules,

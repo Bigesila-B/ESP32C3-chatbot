@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "http_server_priv.h"
+#include "app_chat_help.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -223,6 +224,9 @@ static esp_err_t webim_emit_outbound_json(const cap_im_local_message_t *message)
     http_server_json_add_string(root, "chat_id", message->chat_id ? message->chat_id : "");
     http_server_json_add_string(root, "role", "assistant");
     http_server_json_add_string(root, "text", message->text ? message->text : "");
+    if (app_chat_help_is_reply(message->text)) {
+        cJSON_AddStringToObject(root, "kind", "chat_help");
+    }
     cJSON_AddNumberToObject(root, "ts_ms", (double)(esp_timer_get_time() / 1000LL));
 
     if (message->link_url && message->link_url[0]) {

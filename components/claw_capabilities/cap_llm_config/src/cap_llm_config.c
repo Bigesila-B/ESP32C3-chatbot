@@ -97,7 +97,11 @@ static const cap_llm_preset_t s_presets[] = {
 
 static const char *s_usage =
     "Usage:\n"
+    "/llm  Show model configuration commands\n"
+    "/llm help  Show model configuration commands\n"
+    "/llm ?  Alias for /llm help\n"
     "/llm status\n"
+    "/llm show  Alias for /llm status\n"
     "/llm setup deepseek <api_token> [model]\n"
     "/llm setup openai <api_token> [model]\n"
     "/llm setup qwen <api_token> [model]\n"
@@ -107,6 +111,8 @@ static const char *s_usage =
     "/llm model <model>\n"
     "/llm backend <backend>\n"
     "/llm base-url <base_url>\n"
+    "/llm url <base_url>  Alias for /llm base-url\n"
+    "/llm test  Check whether the configuration is complete\n"
     "/llm reset\n";
 
 static bool is_space(char ch)

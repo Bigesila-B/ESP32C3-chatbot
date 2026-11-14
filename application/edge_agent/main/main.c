@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "app_claw.h"
+#include "app_chat_help.h"
 #include "app_fs.h"
 #include "claw_version.h"
 #include "claw_paths.h"
@@ -328,6 +329,10 @@ void app_main(void)
     ESP_ERROR_CHECK(app_config_load(s_config));
     app_config_to_claw(s_config, s_claw_config);
     init_timezone(app_config_get_timezone(s_config)); // no need to check error
+    esp_err_t help_err = app_chat_help_init();
+    if (help_err != ESP_OK) {
+        ESP_LOGW(TAG, "Chat help initialization: %s", esp_err_to_name(help_err));
+    }
     ESP_ERROR_CHECK(esp_board_manager_init());
     ESP_ERROR_CHECK(app_fs_init());
 
@@ -411,6 +416,12 @@ void app_main(void)
 
     ESP_ERROR_CHECK(app_claw_set_save_config_callback(main_save_claw_config, NULL));
     ESP_ERROR_CHECK(app_claw_start(s_claw_config));
+#if CONFIG_APP_CLAW_CAP_EVENT_ROUTER
+    help_err = app_chat_help_register();
+    if (help_err != ESP_OK) {
+        ESP_LOGW(TAG, "Chat help unavailable: %s", esp_err_to_name(help_err));
+    }
+#endif
 #if CONFIG_APP_CLAW_CAP_IM_LOCAL
     ESP_ERROR_CHECK(http_server_webim_bind_im());
 #endif

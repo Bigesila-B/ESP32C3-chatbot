@@ -257,6 +257,13 @@ static char *parse_error_message_body(const char *body, int status)
     return dup_printf("HTTP %d: %.160s", status, body);
 }
 
+static void (*s_response_observer)(const char *body);
+
+void claw_llm_http_set_response_observer(void (*observer)(const char *body))
+{
+    s_response_observer = observer;
+}
+
 esp_err_t claw_llm_http_post_json(const claw_llm_http_json_request_t *request,
                                   claw_llm_http_response_t *out_response,
                                   char **out_error_message)
@@ -366,6 +373,9 @@ esp_err_t claw_llm_http_post_json(const claw_llm_http_json_request_t *request,
 
     out_response->status_code = status_code;
     out_response->body = buffer.data;
+    if (s_response_observer && out_response->body) {
+        s_response_observer(out_response->body);
+    }
     buffer.data = NULL;
     err = ESP_OK;
 

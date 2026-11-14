@@ -19,6 +19,7 @@ set(http_server_srcs
     "http_server_config_api.c"
     "http_server_lua_modules_api.c"
     "http_server_status_api.c"
+    "http_server_chat_help_api.c"
     "http_server_files_api.c"
     "http_server_wechat_api.c"
     "http_server_webim_api.c"
@@ -28,6 +29,7 @@ set(http_server_srcs
 
 set(http_server_requires
     app_config
+    app_chat_help
     app_claw
     cap_im_local
     claw_cap
