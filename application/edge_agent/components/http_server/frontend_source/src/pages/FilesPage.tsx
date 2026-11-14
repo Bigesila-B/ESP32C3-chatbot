@@ -19,7 +19,7 @@ import { Banner } from '../components/ui/Banner';
 import { Modal } from '../components/ui/Modal';
 import { markDirty } from '../state/dirty';
 import { pushToast } from '../state/toast';
-import { imageUploadSize, jpegUploadName, prepareImageUpload } from '../utils/imageUpload';
+import { compressedImagePath, imageUploadSize, prepareImageUpload } from '../utils/imageUpload';
 
 const EDITABLE_EXT = ['.md', '.json', '.txt', '.jsonl', '.jsonc', '.lua', '.log'];
 
@@ -147,10 +147,7 @@ export const FilesPage: Component = () => {
     setUploading(true);
     try {
       const upload = await prepareImageUpload(file);
-      const lastSlash = target.lastIndexOf('/');
-      const destination = upload === file
-        ? target
-        : target.slice(0, lastSlash + 1) + jpegUploadName(target.slice(lastSlash + 1));
+      const destination = upload === file ? target : compressedImagePath(target, upload.type);
       await uploadFile(destination, upload);
       setUploadPath('');
       setChosenFile(null);

@@ -165,7 +165,7 @@ pnpm run build
 
 ### 3.5 网页图片上传
 
-`frontend_source/src/utils/imageUpload.ts` 在浏览器中处理超过 512 KiB 的图片。在线聊天和文件管理都在调用 `uploadFile()` 前准备文件。压缩后的文件使用 `.jpg` 扩展名。移植时接到新版的两个文件选择入口，并与 `HTTP_SERVER_UPLOAD_MAX_SIZE` 对齐。用超限图片、原尺寸小图和无法解码的图片分别验证上传结果。
+`frontend_source/src/utils/imageUpload.ts` 在浏览器中处理超过 512 KiB 的图片。在线聊天和文件管理都在调用 `uploadFile()` 前准备文件。先尝试保留尺寸，PNG 先尝试重新编码为 PNG，其余候选采用高质量 JPEG，确实超限时逐步缩小。结果按编码使用 `.png` 或 `.jpg`。移植时接到新版的两个文件选择入口，并与 `HTTP_SERVER_UPLOAD_MAX_SIZE` 对齐。用大图、带小字的截图、限额内原图和无法解码的图片验证上传结果。
 
 ### 3.6 可写分区耗尽时的处理
 

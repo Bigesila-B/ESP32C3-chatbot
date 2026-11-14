@@ -2,12 +2,15 @@ import { t, tf } from '../i18n';
 
 // Keep this in sync with HTTP_SERVER_UPLOAD_MAX_SIZE in http_server_priv.h.
 export const UPLOAD_MAX_BYTES = 512 * 1024;
-const MAX_IMAGE_EDGE = 2560;
-const JPEG_QUALITIES = [0.9, 0.76, 0.6];
+// Bound canvas memory on mobile while allowing a 4K image at full size.
+const MAX_CANVAS_EDGE = 8192;
+const MAX_CANVAS_PIXELS = 12 * 1024 * 1024;
+const JPEG_QUALITIES = [0.95, 0.90, 0.85, 0.80];
 const IMAGE_EXTENSION = /\.(avif|bmp|gif|heic|heif|jpe?g|png|svg|tiff?|webp)$/i;
 
-export function jpegUploadName(name: string): string {
-  return name.replace(/\.[^.\/]+$/, '') + '.jpg';
+export function compressedImagePath(path: string, type: string): string {
+  const extension = type === 'image/png' ? '.png' : '.jpg';
+  return path.replace(/\.[^./]+$/, '') + extension;
 }
 
 export function imageUploadSize(file: File): number {
@@ -23,8 +26,17 @@ function loadImage(file: File, url: string): Promise<HTMLImageElement> {
   });
 }
 
-async function encodeJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> {
-  return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+function encodeImage(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob?.type === type && blob.size > 0 ? blob : null), type, quality);
+  });
+}
+
+function asUploadFile(original: File, blob: Blob): File {
+  return new File([blob], compressedImagePath(original.name, blob.type), {
+    type: blob.type,
+    lastModified: original.lastModified,
+  });
 }
 
 export async function prepareImageUpload(file: File): Promise<File> {
@@ -37,25 +49,40 @@ export async function prepareImageUpload(file: File): Promise<File> {
   const canvas = document.createElement('canvas');
   try {
     const image = await loadImage(file, url);
-    const context = canvas.getContext('2d', { alpha: false });
-    if (!context) throw new Error(t('uploadImageCompressionFailed'));
+    const context = canvas.getContext('2d');
+    const { naturalWidth: width, naturalHeight: height } = image;
+    if (!context || !width || !height) throw new Error(t('uploadImageCompressionFailed'));
 
-    const longest = Math.max(image.naturalWidth, image.naturalHeight);
-    let edge = Math.min(longest, MAX_IMAGE_EDGE);
-    while (edge >= 1) {
-      canvas.width = Math.max(1, Math.round(image.naturalWidth * edge / longest));
-      canvas.height = Math.max(1, Math.round(image.naturalHeight * edge / longest));
-      context.fillStyle = '#fff';
-      context.fillRect(0, 0, canvas.width, canvas.height);
+    let tryPng = file.type === 'image/png' || /\.png$/i.test(file.name);
+    let scale = Math.min(1, MAX_CANVAS_EDGE / Math.max(width, height), Math.sqrt(MAX_CANVAS_PIXELS / (width * height)));
+    while (true) {
+      canvas.width = Math.max(1, Math.floor(width * scale));
+      canvas.height = Math.max(1, Math.floor(height * scale));
+      context.imageSmoothingQuality = 'high';
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
 
-      for (const quality of JPEG_QUALITIES) {
-        const blob = await encodeJpeg(canvas, quality);
-        if (blob?.type === 'image/jpeg' && blob.size > 0 && blob.size <= UPLOAD_MAX_BYTES) {
-          return new File([blob], jpegUploadName(file.name), { type: blob.type, lastModified: file.lastModified });
-        }
+      if (tryPng) {
+        const png = await encodeImage(canvas, 'image/png');
+        if (png && png.size <= UPLOAD_MAX_BYTES) return asUploadFile(file, png);
+        tryPng = false;
       }
-      edge = Math.floor(edge * 0.75);
+
+      // JPEG needs an opaque background. Leave transparent pixels intact in PNG.
+      context.globalCompositeOperation = 'destination-over';
+      context.fillStyle = '#fff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      let jpegSize = 0;
+      for (const quality of JPEG_QUALITIES) {
+        const jpeg = await encodeImage(canvas, 'image/jpeg', quality);
+        if (!jpeg) break;
+        if (jpeg.size <= UPLOAD_MAX_BYTES) return asUploadFile(file, jpeg);
+        jpegSize = jpeg.size;
+      }
+      if (canvas.width === 1 && canvas.height === 1) break;
+
+      // Estimate the resize from the bytes still needed and recheck the result.
+      const fitScale = jpegSize ? Math.sqrt(UPLOAD_MAX_BYTES / jpegSize) : 0.78;
+      scale *= Math.max(0.78, Math.min(0.94, fitScale));
     }
     throw new Error(t('uploadImageCompressionFailed'));
   } finally {
