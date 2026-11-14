@@ -23,6 +23,16 @@ type BasicForm = {
   show_tool_progress: boolean;
 };
 
+function networkSettingsChanged(form: BasicForm, config: Partial<AppConfig>) {
+  return (
+    form.wifi_ssid !== (config.wifi_ssid ?? '') ||
+    form.wifi_password !== (config.wifi_password ?? '') ||
+    form.ap_ssid !== (config.ap_ssid ?? '') ||
+    form.ap_password !== (config.ap_password ?? '') ||
+    form.ap_behavior !== (config.ap_behavior ?? 'keep')
+  );
+}
+
 export const BasicPage: Component<{ onRestartRequest: () => void }> = (props) => {
   const tab = createConfigTab<BasicForm>({
     tab: 'basic',
@@ -36,15 +46,21 @@ export const BasicPage: Component<{ onRestartRequest: () => void }> = (props) =>
       time_timezone: config.time_timezone ?? '',
       show_tool_progress: config.show_tool_progress === 'true' || config.show_tool_progress === '1',
     }),
-    fromForm: (form) => ({
-      wifi_ssid: form.wifi_ssid.trim(),
-      wifi_password: form.wifi_password,
-      ap_ssid: form.ap_ssid.trim(),
-      ap_password: form.ap_password,
-      ap_behavior: form.ap_behavior,
-      time_timezone: form.time_timezone.trim(),
-      show_tool_progress: String(form.show_tool_progress),
-    }),
+    fromForm: (form) => {
+      const config = appConfig();
+      const patch: Partial<AppConfig> = { show_tool_progress: String(form.show_tool_progress) };
+      if (networkSettingsChanged(form, config)) {
+        patch.wifi_ssid = form.wifi_ssid.trim();
+        patch.wifi_password = form.wifi_password;
+        patch.ap_ssid = form.ap_ssid.trim();
+        patch.ap_password = form.ap_password;
+        patch.ap_behavior = form.ap_behavior;
+      }
+      if (form.time_timezone !== (config.time_timezone ?? '')) {
+        patch.time_timezone = form.time_timezone.trim();
+      }
+      return patch;
+    },
   });
   const [validationError, setValidationError] = createSignal<string | null>(null);
   const [confirmOpen, setConfirmOpen] = createSignal(false);
@@ -63,34 +79,30 @@ export const BasicPage: Component<{ onRestartRequest: () => void }> = (props) =>
     const wifiPassword = tab.form.wifi_password;
     const apPassword = tab.form.ap_password;
 
-    if (!wifiSsid) {
+    const networkChanged = networkSettingsChanged(tab.form, appConfig());
+    const needsRestart = networkChanged || tab.form.time_timezone !== (appConfig().time_timezone ?? '');
+
+    if (networkChanged && !wifiSsid) {
       const message = t('wifiValidationSsidRequired') as string;
       setValidationError(message);
       pushToast(message, 'error', 5000);
       return;
     }
 
-    if (wifiPassword.length > 0 && wifiPassword.length < 8) {
+    if (networkChanged && wifiPassword.length > 0 && wifiPassword.length < 8) {
       const message = t('wifiValidationPasswordLength') as string;
       setValidationError(message);
       pushToast(message, 'error', 5000);
       return;
     }
 
-    if (apPassword.length > 0 && apPassword.length < 8) {
+    if (networkChanged && apPassword.length > 0 && apPassword.length < 8) {
       const message = t('apValidationPasswordLength') as string;
       setValidationError(message);
       pushToast(message, 'error', 5000);
       return;
     }
 
-    const needsRestart =
-      wifiSsid !== (appConfig().wifi_ssid ?? '').trim() ||
-      wifiPassword !== (appConfig().wifi_password ?? '') ||
-      tab.form.ap_ssid.trim() !== (appConfig().ap_ssid ?? '').trim() ||
-      apPassword !== (appConfig().ap_password ?? '') ||
-      tab.form.ap_behavior !== (appConfig().ap_behavior ?? 'keep') ||
-      tab.form.time_timezone.trim() !== (appConfig().time_timezone ?? '').trim();
     await tab.save();
     if (needsRestart) setConfirmOpen(true);
   };
