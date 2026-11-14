@@ -1,7 +1,7 @@
 > [!IMPORTANT]
 > ## ESP-Claw 定制版
 >
-> 新增 Web 指令列表和聊天 `/help`，展示中文指令说明和 token 用量。Web 可配置 MCP，带 PSRAM 的 ESP32-S3 可选用 MicroPython Skills。大图上传前会优先保留细节并自动压缩，本版同时改进了上下文压缩和存储写满后的恢复，默认路由也移除了小龙虾提示。
+> 新增 Web 指令列表、聊天 `/help` 和 token 用量，内置聊天指令的子菜单和回复也有中文。Web 可配置 MCP、查看技能列表和切换工具调用过程，带 PSRAM 的 ESP32-S3 可选用 MicroPython Skills。大图上传前会优先保留细节并自动压缩，本版同时改进了上下文压缩和存储写满后的恢复，默认路由也移除了小龙虾提示。
 >
 > 定制分支 `feature/context-compaction` 基于官方 ESP-Claw `a4edfe5`。查看[版本对比、使用说明和实测范围](./docs/src/content/docs/zh-cn/reference-project/fork-edition.mdx)、[英文文档](./docs/src/content/docs/en/reference-project/fork-edition.mdx)及[上游更新迁移指南](./FORK_GUIDE.md)。
 

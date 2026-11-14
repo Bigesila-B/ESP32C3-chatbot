@@ -155,7 +155,7 @@ pnpm run build
 | `http_server` 和前端导航 | 挂载 `/api/chat/help` 和指令列表页。旧 Web IM 从 WebSocket 消息的 `kind` 渲染回复图标。新版 `http_server_webim_send_session()` 直接提交 Agent 请求，需在该入口提交前处理 `/help`，再由会话聊天页面渲染帮助回复和 favicon。 |
 | `cap_session_mgr` 和 `cap_llm_config` | 用各自已有的用法说明维护子指令和别名。单独运行 `/session` 或 `/llm` 时也会显示这些说明。 |
 
-`app_chat_help.c` 中的描述表只补充中英文文案。新增内置指令时按命令名维护描述，指令是否显示仍取决于设备实际启用的路由。自定义路由沿用自己的描述。
+`cap_session_mgr` 和 `cap_llm_config` 各自维护一份中英文指令描述，由实际回复、`/help` 和网页指令列表共用。新增指令时更新对应命令表，显示范围由设备实际启用的路由决定。自定义路由沿用自己的描述。
 
 用量用设备时区分日、分月累计，只计模型响应中的真实用量。NVS 命名空间为 `claw_usage`，键为 `totals_v1`。换基线时保留此记录格式，或迁移旧值。生成前端资源后重新构建固件。回归时检查网页指令和 `/help` 一致、`/help` 不触发模型请求、普通对话增加计数、重启后统计可读。
 
@@ -177,7 +177,11 @@ pnpm run build
 
 `components/claw_capabilities/cap_micropython/` 封装运行时、工具和内置 Skill。移植时核对 `app_claw` 的 Kconfig、组件依赖及注册入口，再测自定义 Skill 激活、同目录导入和超时。MicroPython 要求 ESP32-S3 和 PSRAM，构建后检查应用分区容量。
 
+Web「技能列表」调用 `http_server_skill_catalog_api.c`，读取 Skill 注册表和当前工具组状态。移植时核对注册表迭代接口和 Web 导航，复测内置 Skill、注册后的自定义 Skill 以及缺少依赖时的提示。
+
 默认聊天提示曾由 `application/edge_agent/fatfs_image/system/.recovery/router_rules/router_rules.json` 的 `im_any_message_working_reply` 控制。迁移时核对新版规则是否仍含该提示。已有设备的 DATA 路由保留在设备上，处理方式见[定制版使用说明](./docs/src/content/docs/zh-cn/reference-project/fork-edition.mdx)。
+
+Web「显示工具调用过程」通过 `show_tool_progress` 保存进 NVS，启动和保存配置时调用 `claw_core_set_tool_progress_enabled()`。迁移时检查新版本的进度事件和最终回复入口，复测关闭过程通知时工具仍可执行且最终回复正常送达。
 
 ## 4. 同步官方更新
 

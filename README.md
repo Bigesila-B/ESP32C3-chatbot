@@ -1,7 +1,7 @@
 > [!IMPORTANT]
 > ## ESP-Claw fork edition
 >
-> This branch adds a Web command list and local `/help` with Chinese descriptions and usage stats, Web MCP settings, optional MicroPython Skills for ESP32-S3, detail-preserving compression for Web image uploads, and improvements to session compaction and full-storage recovery. It also removes the default lobster reply notice from fresh setups.
+> This branch adds a Web command list, local `/help` with usage stats, Chinese command replies, Web MCP settings, a Web Skills catalog and a tool-call progress switch. It also adds optional MicroPython Skills for ESP32-S3, browser image compression, session compaction and full-storage recovery improvements, and removes the default lobster reply notice from fresh setups.
 >
 > The `feature/context-compaction` branch is based on official ESP-Claw `a4edfe5`. See the [upstream comparison and setup guide](./docs/src/content/docs/en/reference-project/fork-edition.mdx), [中文文档](./docs/src/content/docs/zh-cn/reference-project/fork-edition.mdx), and [upgrade workflow](./FORK_GUIDE.md).
 
