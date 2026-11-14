@@ -20,6 +20,7 @@ set(http_server_srcs
     "http_server_lua_modules_api.c"
     "http_server_status_api.c"
     "http_server_chat_help_api.c"
+    "http_server_skill_catalog_api.c"
     "http_server_files_api.c"
     "http_server_wechat_api.c"
     "http_server_webim_api.c"
@@ -36,6 +37,10 @@ set(http_server_requires
     esp_http_server
     heap
 )
+
+if(CONFIG_APP_CLAW_CAP_SKILL_MGR)
+    list(APPEND http_server_requires claw_skill)
+endif()
 
 if(CONFIG_APP_CLAW_LUA_MODULE_HTTP_SERVER)
     list(APPEND http_server_srcs "http_server_lua_app_api.c")

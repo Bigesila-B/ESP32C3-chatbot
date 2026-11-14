@@ -16,6 +16,8 @@
 #include "cJSON.h"
 #include "esp_log.h"
 #include "esp_check.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "claw_skill.h"
 
 static const char *TAG = "claw_skill";
@@ -67,6 +69,7 @@ typedef struct {
     size_t max_file_bytes;
     claw_skill_registry_entry_t *entries;
     size_t entry_count;
+    SemaphoreHandle_t catalog_lock;
 } claw_skill_state_t;
 
 static claw_skill_state_t *s_skill = NULL;
@@ -194,6 +197,9 @@ static void claw_skill_reset(void)
         free(s_skill->roots[i]);
     }
     free(s_skill->roots);
+    if (s_skill->catalog_lock) {
+        vSemaphoreDelete(s_skill->catalog_lock);
+    }
     memset(s_skill, 0, sizeof(*s_skill));
     free(s_skill);
     s_skill = NULL;
@@ -1523,6 +1529,11 @@ esp_err_t claw_skill_init(const claw_skill_config_t *config)
     claw_skill_reset();
     s_skill = calloc(1, sizeof(*s_skill));
     ESP_RETURN_ON_FALSE(s_skill!= NULL, ESP_ERR_NO_MEM, TAG, "alloc skill registry failed");
+    s_skill->catalog_lock = xSemaphoreCreateMutex();
+    if (!s_skill->catalog_lock) {
+        claw_skill_reset();
+        return ESP_ERR_NO_MEM;
+    }
     safe_copy(s_skill->session_state_root_dir, sizeof(s_skill->session_state_root_dir), config->session_state_root_dir);
     s_skill->max_file_bytes = config->max_file_bytes;
 
@@ -1580,6 +1591,7 @@ esp_err_t claw_skill_reload_registry(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    xSemaphoreTake(s_skill->catalog_lock, portMAX_DELAY);
     old_entries = s_skill->entries;
     old_count = s_skill->entry_count;
     s_skill->entries = NULL;
@@ -1589,12 +1601,12 @@ esp_err_t claw_skill_reload_registry(void)
     if (err == ESP_OK) {
         free_registry_entries(old_entries, old_count);
         ESP_LOGI(TAG, "Reloaded registry with %u skill(s)", (unsigned)s_skill->entry_count);
-        return ESP_OK;
+    } else {
+        s_skill->entries = old_entries;
+        s_skill->entry_count = old_count;
+        ESP_LOGE(TAG, "reload registry: %s", esp_err_to_name(err));
     }
-
-    s_skill->entries = old_entries;
-    s_skill->entry_count = old_count;
-    ESP_LOGE(TAG, "reload registry: %s", esp_err_to_name(err));
+    xSemaphoreGive(s_skill->catalog_lock);
     return err;
 }
 
@@ -1678,8 +1690,6 @@ static void fill_catalog_entry_view(const claw_skill_registry_entry_t *entry, cl
 
 esp_err_t claw_skill_foreach_catalog_entry(claw_skill_catalog_cb_t cb, void *user_ctx)
 {
-    size_t i;
-
     if (!s_skill || !s_skill->initialized) {
         ESP_LOGD(TAG, "foreach before init");
         return ESP_ERR_INVALID_STATE;
@@ -1688,18 +1698,20 @@ esp_err_t claw_skill_foreach_catalog_entry(claw_skill_catalog_cb_t cb, void *use
         return ESP_ERR_INVALID_ARG;
     }
 
-    for (i = 0; i < s_skill->entry_count; i++) {
+    esp_err_t err = ESP_OK;
+    xSemaphoreTake(s_skill->catalog_lock, portMAX_DELAY);
+    for (size_t i = 0; i < s_skill->entry_count; i++) {
         claw_skill_catalog_entry_t view;
-        esp_err_t err;
 
         fill_catalog_entry_view(&s_skill->entries[i], &view);
         err = cb(&view, user_ctx);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "catalog iteration stopped: id=%s err=%s", view.id ? view.id : "(null)", esp_err_to_name(err));
-            return err;
+            break;
         }
     }
-    return ESP_OK;
+    xSemaphoreGive(s_skill->catalog_lock);
+    return err;
 }
 
 esp_err_t claw_skill_get_catalog_entry(const char *skill_id, claw_skill_catalog_entry_t *out_entry)

@@ -142,8 +142,8 @@ esp_err_t claw_skill_render_catalog_json(char *buf, size_t size);
  *         - any error returned by cb
  *
  * @note  The callback receives a read-only view whose pointers remain valid
- *        until the next registry reload or reset. Consumers that keep data
- *        longer must copy it.
+ *        during the callback. Copy anything needed after iteration. The
+ *        callback must not reload the registry or start another iteration.
  */
 esp_err_t claw_skill_foreach_catalog_entry(claw_skill_catalog_cb_t cb, void *user_ctx);
 
