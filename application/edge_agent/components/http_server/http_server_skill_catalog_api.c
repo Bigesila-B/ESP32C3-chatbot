@@ -53,7 +53,8 @@ static esp_err_t skill_catalog_get_handler(httpd_req_t *req)
     if (err != ESP_OK) {
         cJSON_Delete(root);
         if (err == ESP_ERR_INVALID_STATE) {
-            return httpd_resp_send_err(req, HTTPD_503_SERVICE_UNAVAILABLE, NULL);
+            httpd_resp_set_status(req, "503 Service Unavailable");
+            return httpd_resp_sendstr(req, "The skill catalog is not ready.");
         }
         return httpd_resp_send_500(req);
     }

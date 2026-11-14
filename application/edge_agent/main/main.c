@@ -6,6 +6,7 @@
 #include "app_claw.h"
 #include "app_chat_help.h"
 #include "app_fs.h"
+#include "claw_core.h"
 #include "claw_version.h"
 #include "claw_paths.h"
 #include "edge_agent_version.h"
