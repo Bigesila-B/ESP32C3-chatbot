@@ -8,6 +8,7 @@
 
 #include <errno.h>
 #include <inttypes.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1576,6 +1577,22 @@ static uint32_t session_history_context_window_for_model(const char *model)
     return CLAW_MEMORY_CTX_WINDOW_DEFAULT;
 }
 
+/* Configuration updates and chat requests run on separate tasks. */
+static atomic_uint_least32_t s_model_context_window = CLAW_MEMORY_CTX_WINDOW_DEFAULT;
+
+void claw_memory_set_context_model(const char *model)
+{
+    atomic_store_explicit(&s_model_context_window, session_history_context_window_for_model(model),
+                          memory_order_relaxed);
+}
+
+static uint32_t session_history_context_window(void)
+{
+    return s_memory.context_window_tokens > 0
+           ? s_memory.context_window_tokens
+           : atomic_load_explicit(&s_model_context_window, memory_order_relaxed);
+}
+
 /* 把会话文件字节数粗估成 token 数。
  * 中文为主的 UTF-8 约 3 字节/字，叠加 JSON 结构开销后整体约 3 字节/token，
  * 误差约 ±30%，对“是否接近窗口上限”这类判断已经够用。 */
@@ -1617,6 +1634,38 @@ static char *session_history_summary_path_for_session(const char *session_id)
     summary_path = session_history_summary_path_dup(data_path);
     free(data_path);
     return summary_path;
+}
+
+esp_err_t claw_memory_get_session_usage(const char *session_id, claw_memory_session_usage_t *out)
+{
+    if (!session_id || !session_id[0] || !out) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_memory.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char *data_path = claw_memory_session_path_dup(session_id);
+    if (!data_path) {
+        return ESP_ERR_NO_MEM;
+    }
+    size_t bytes = file_size_bytes(data_path);
+    if (bytes > 0) {
+        char *summary_path = session_history_summary_path_dup(data_path);
+        if (!summary_path) {
+            free(data_path);
+            return ESP_ERR_NO_MEM;
+        }
+        bytes += file_size_bytes(summary_path);
+        free(summary_path);
+    }
+    free(data_path);
+
+    *out = (claw_memory_session_usage_t) {
+        .estimated_tokens = session_history_estimate_tokens(bytes),
+        .window_tokens = session_history_context_window(),
+    };
+    return ESP_OK;
 }
 
 static esp_err_t session_history_save_summary(const char *data_path, const char *summary)
@@ -2042,9 +2091,7 @@ static esp_err_t session_history_compact_if_needed(const char *session_id,
 
     /* 第一层：软阈值 —— 估算 token 达到模型上下文窗口的指定比例即压缩。
      * 窗口优先取用户显式配置，未配置（0）时按模型名自动匹配。 */
-    window = s_memory.context_window_tokens > 0
-             ? s_memory.context_window_tokens
-             : session_history_context_window_for_model(s_memory.llm_model);
+    window = session_history_context_window();
     trigger_tokens = (size_t)window * CLAW_MEMORY_CTX_TRIGGER_PERCENT / 100U;
     estimated_tokens = session_history_estimate_tokens(data_size);
 
@@ -2055,12 +2102,11 @@ static esp_err_t session_history_compact_if_needed(const char *session_id,
     }
 
     ESP_LOGI(TAG,
-             "session compact trigger session=%s bytes=%u est_tokens=%u window=%u model=%s",
+             "session compact trigger session=%s bytes=%u est_tokens=%u window=%u",
              session_id,
              (unsigned)data_size,
              (unsigned)estimated_tokens,
-             (unsigned)window,
-             s_memory.llm_model[0] ? s_memory.llm_model : "(default)");
+             (unsigned)window);
 
     err = session_history_validate_pair(data_path, idx_path, &index);
     if (err != ESP_OK) {

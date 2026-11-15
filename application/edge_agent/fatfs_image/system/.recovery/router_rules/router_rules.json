@@ -90,6 +90,27 @@
     ]
   },
   {
+    "id": "im_mcp_models",
+    "description": "查询 MCP 图片模型",
+    "match": {
+      "event_type": "message",
+      "event_key": "text",
+      "content_type": "text",
+      "text": "/mcp models",
+      "text_match_rule": "prefix"
+    },
+    "actions": [
+      {
+        "type": "run_script",
+        "input": {
+          "path": "/system/skills/cap_mcp_client/scripts/list_models.lua",
+          "args": {"kind": "image", "offset": "{{match.remainder}}"}
+        }
+      },
+      {"type": "send_message", "input": {}}
+    ]
+  },
+  {
     "id": "im_attachment_saved_reply",
     "description": "Reply when an IM attachment is saved.",
     "enabled": true,

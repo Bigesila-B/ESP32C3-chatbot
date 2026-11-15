@@ -7,9 +7,18 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "settings_store.h"
+
+#if CONFIG_APP_CLAW_CAP_MCP_CLIENT
+#include "cap_mcp_client.h"
+#include "esp_log.h"
+
+static esp_err_t app_config_load_mcp_servers(void);
+#endif
 
 typedef struct {
     const char *key;
@@ -424,6 +433,12 @@ esp_err_t app_config_init(void)
     if (err != ESP_OK) {
         return err;
     }
+#if CONFIG_APP_CLAW_CAP_MCP_CLIENT
+    err = app_config_load_mcp_servers();
+    if (err != ESP_OK) {
+        ESP_LOGW("app_config", "Cannot load MCP servers: %s", esp_err_to_name(err));
+    }
+#endif
     return app_config_upgrade_legacy_llm_settings();
 }
 
@@ -441,6 +456,240 @@ void app_config_load_defaults(app_config_t *config)
                 s_fields[i].size);
     }
 }
+
+#if CONFIG_APP_CLAW_CAP_MCP_CLIENT
+/* Store the token and its URL in one NVS key. An interrupted save that updates
+ * only mcp_server_url must not send the old token to the new server. */
+#define APP_MCP_BEARER_KEY "mcp_bearer"
+#define APP_MCP_BEARER_RECORD_SIZE (2 * APP_CONFIG_STR_LEN)
+#define APP_MCP_SERVERS_KEY "mcp_servers_v1"
+#define APP_MCP_SERVERS_RECORD_SIZE 4096
+
+static cJSON *mcp_servers_json(const cap_mcp_servers_t *servers, bool include_tokens)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON *items = cJSON_AddArrayToObject(root, "servers");
+    bool ok = items != NULL;
+    for (size_t i = 0; ok && i < servers->count; ++i) {
+        const cap_mcp_server_config_t *entry = &servers->items[i];
+        cJSON *row = cJSON_CreateObject();
+        if (!cJSON_AddItemToArray(items, row)) {
+            cJSON_Delete(row);
+            ok = false;
+            break;
+        }
+        ok = cJSON_AddNumberToObject(row, "id", entry->id) &&
+             cJSON_AddStringToObject(row, "name", entry->name) &&
+             cJSON_AddStringToObject(row, "server_url", entry->url) &&
+             (include_tokens ? cJSON_AddStringToObject(row, "bearer_token", entry->token) :
+                               cJSON_AddBoolToObject(row, "has_token", entry->token[0] != '\0'));
+    }
+    if (ok && (include_tokens || (cJSON_AddNumberToObject(root, "version", servers->version) &&
+                                  cJSON_AddNumberToObject(root, "limit", CAP_MCP_SERVER_LIMIT)))) {
+        return root;
+    }
+    cJSON_Delete(root);
+    return NULL;
+}
+
+static bool mcp_number(const cJSON *item, uint32_t *number)
+{
+    if (!cJSON_IsNumber(item) || !(item->valuedouble >= 0 && item->valuedouble <= UINT32_MAX)) {
+        return false;
+    }
+    *number = (uint32_t)item->valuedouble;
+    return item->valuedouble == *number;
+}
+
+static esp_err_t mcp_decode_servers(const cJSON *root, const cap_mcp_servers_t *previous, cap_mcp_servers_t *next)
+{
+    const cJSON *items = cJSON_GetObjectItemCaseSensitive(root, "servers");
+    if (!cJSON_IsArray(items) || cJSON_GetArraySize(items) > CAP_MCP_SERVER_LIMIT) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint32_t new_id = 0;
+    for (size_t i = 0; previous && i < previous->count; ++i) {
+        if (previous->items[i].id > new_id) {
+            new_id = previous->items[i].id;
+        }
+    }
+    const cJSON *row;
+    cJSON_ArrayForEach(row, items) {
+        cap_mcp_server_config_t *entry = &next->items[next->count++];
+        const cJSON *id_item = cJSON_GetObjectItemCaseSensitive(row, "id");
+        const cJSON *token_item = cJSON_GetObjectItemCaseSensitive(row, "bearer_token");
+        const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "name"));
+        const char *url = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "server_url"));
+        const char *token = cJSON_GetStringValue(token_item);
+        if (!name || strlen(name) >= sizeof(entry->name) || !url || strlen(url) >= sizeof(entry->url) ||
+                (token_item && (!token || strlen(token) >= sizeof(entry->token)))) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        if (id_item) {
+            if (!mcp_number(id_item, &entry->id) || !entry->id) {
+                return ESP_ERR_INVALID_ARG;
+            }
+            if (previous) {
+                size_t i = 0;
+                while (i < previous->count && previous->items[i].id != entry->id) {
+                    ++i;
+                }
+                if (i == previous->count) {
+                    return ESP_ERR_INVALID_ARG;
+                }
+                if (!token && strcmp(url, previous->items[i].url) == 0) {
+                    token = previous->items[i].token;
+                }
+            }
+        } else if (!previous || !(entry->id = ++new_id)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        strlcpy(entry->name, name, sizeof(entry->name));
+        strlcpy(entry->url, url, sizeof(entry->url));
+        strlcpy(entry->token, token ? token : "", sizeof(entry->token));
+    }
+    return cap_mcp_client_validate_servers(next);
+}
+
+static esp_err_t app_config_load_mcp_servers(void)
+{
+    char *record = malloc(APP_MCP_SERVERS_RECORD_SIZE);
+    if (!record) {
+        return ESP_ERR_NO_MEM;
+    }
+    esp_err_t err = settings_store_get_string(APP_MCP_SERVERS_KEY, record, APP_MCP_SERVERS_RECORD_SIZE, "");
+    if (err == ESP_OK && record[0]) {
+        cap_mcp_servers_t *servers = calloc(1, sizeof(*servers));
+        cJSON *root = cJSON_Parse(record);
+        err = servers ? mcp_decode_servers(root, NULL, servers) : ESP_ERR_NO_MEM;
+        if (err == ESP_OK) {
+            err = cap_mcp_client_set_servers(servers);
+        }
+        cJSON_Delete(root);
+        free(servers);
+    }
+    free(record);
+    return err;
+}
+
+static esp_err_t mcp_store_servers(const cap_mcp_servers_t *servers)
+{
+    esp_err_t err = cap_mcp_client_validate_servers(servers);
+    if (err != ESP_OK) {
+        return err;
+    }
+    cJSON *root = mcp_servers_json(servers, true);
+    char *record = root ? cJSON_PrintUnformatted(root) : NULL;
+    cJSON_Delete(root);
+    if (!record) {
+        return ESP_ERR_NO_MEM;
+    }
+    err = strlen(record) < APP_MCP_SERVERS_RECORD_SIZE ?
+          settings_store_set_string(APP_MCP_SERVERS_KEY, record) : ESP_ERR_INVALID_SIZE;
+    cJSON_free(record);
+    return err == ESP_OK ? cap_mcp_client_set_servers(servers) : err;
+}
+
+cJSON *app_config_mcp_servers(void)
+{
+    cap_mcp_servers_t *servers = malloc(sizeof(*servers));
+    if (!servers) {
+        return NULL;
+    }
+    cap_mcp_client_get_servers(servers);
+    cJSON *root = mcp_servers_json(servers, false);
+    free(servers);
+    return root;
+}
+
+esp_err_t app_config_mcp_replace(const cJSON *input)
+{
+    uint32_t version;
+    if (!mcp_number(cJSON_GetObjectItemCaseSensitive(input, "version"), &version)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    cap_mcp_servers_t *before = malloc(sizeof(*before));
+    cap_mcp_servers_t *after = calloc(1, sizeof(*after));
+    esp_err_t err = ESP_ERR_NO_MEM;
+    if (before && after) {
+        cap_mcp_client_get_servers(before);
+        err = before->version == version ? mcp_decode_servers(input, before, after) : ESP_ERR_INVALID_STATE;
+        if (err == ESP_OK) {
+            err = mcp_store_servers(after);
+        }
+    }
+    free(before);
+    free(after);
+    return err;
+}
+
+esp_err_t app_config_mcp_update_default(const char *url, const char *token)
+{
+    if (!cap_mcp_client_get_named_default(NULL, NULL, 0)) {
+        return ESP_OK;
+    }
+    cap_mcp_servers_t *servers = malloc(sizeof(*servers));
+    if (!servers) {
+        return ESP_ERR_NO_MEM;
+    }
+    cap_mcp_client_get_servers(servers);
+    cap_mcp_server_config_t *entry = &servers->items[0];
+    esp_err_t err = ESP_OK;
+    if (url[0] && !servers->count) {
+        memset(entry, 0, sizeof(*entry));
+        entry->id = 1;
+        strlcpy(entry->name, "MCP", sizeof(entry->name));
+        servers->count = 1;
+    }
+    if (servers->count && (strcmp(entry->url, url) != 0 || strcmp(entry->token, token) != 0)) {
+        if (url[0]) {
+            strlcpy(entry->url, url, sizeof(entry->url));
+            strlcpy(entry->token, token, sizeof(entry->token));
+        } else {
+            --servers->count;
+            memmove(entry, entry + 1, servers->count * sizeof(*entry));
+            memset(entry + servers->count, 0, sizeof(*entry));
+        }
+        err = mcp_store_servers(servers);
+    }
+    free(servers);
+    return err;
+}
+
+static esp_err_t app_config_load_mcp_bearer(app_config_t *config)
+{
+    if (!config->mcp_server_url[0]) {
+        return ESP_OK;
+    }
+    char *record = malloc(APP_MCP_BEARER_RECORD_SIZE);
+    if (!record) {
+        return ESP_ERR_NO_MEM;
+    }
+    esp_err_t err = settings_store_get_string(APP_MCP_BEARER_KEY, record, APP_MCP_BEARER_RECORD_SIZE, "");
+    if (err == ESP_OK) {
+        size_t url_len = strlen(config->mcp_server_url);
+        if (strncmp(record, config->mcp_server_url, url_len) == 0 && record[url_len] == '\n') {
+            strlcpy(config->mcp_bearer_token, record + url_len + 1, sizeof(config->mcp_bearer_token));
+        }
+    }
+    free(record);
+    return err;
+}
+
+static esp_err_t app_config_save_mcp_bearer(const app_config_t *config)
+{
+    if (!config->mcp_bearer_token[0]) {
+        return settings_store_erase_key(APP_MCP_BEARER_KEY);
+    }
+    char *record = NULL;
+    if (asprintf(&record, "%s\n%s", config->mcp_server_url, config->mcp_bearer_token) < 0) {
+        return ESP_ERR_NO_MEM;
+    }
+    esp_err_t err = settings_store_set_string(APP_MCP_BEARER_KEY, record);
+    free(record);
+    return err;
+}
+#endif
 
 esp_err_t app_config_load(app_config_t *config)
 {
@@ -482,7 +731,15 @@ esp_err_t app_config_load(app_config_t *config)
         }
     }
 
+#if CONFIG_APP_CLAW_CAP_MCP_CLIENT
+    if (cap_mcp_client_get_named_default(config->mcp_server_url, config->mcp_bearer_token,
+                                         sizeof(config->mcp_server_url))) {
+        return ESP_OK;
+    }
+    return app_config_load_mcp_bearer(config);
+#else
     return ESP_OK;
+#endif
 }
 
 esp_err_t app_config_save(const app_config_t *config)
@@ -491,7 +748,15 @@ esp_err_t app_config_save(const app_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
 
+#if CONFIG_APP_CLAW_CAP_MCP_CLIENT
+    bool named_mcp = cap_mcp_client_get_named_default(NULL, NULL, 0);
+#endif
     for (size_t i = 0; i < sizeof(s_fields) / sizeof(s_fields[0]); ++i) {
+#if CONFIG_APP_CLAW_CAP_MCP_CLIENT
+        if (named_mcp && s_fields[i].offset == offsetof(app_config_t, mcp_server_url)) {
+            continue;
+        }
+#endif
         esp_err_t err = settings_store_set_string(s_fields[i].key,
                                                   app_config_field_cptr(config, &s_fields[i]));
         if (err != ESP_OK) {
@@ -499,6 +764,14 @@ esp_err_t app_config_save(const app_config_t *config)
         }
     }
 
+#if CONFIG_APP_CLAW_CAP_MCP_CLIENT
+    if (!named_mcp) {
+        esp_err_t err = app_config_save_mcp_bearer(config);
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+#endif
     return settings_store_commit();
 }
 
@@ -600,6 +873,7 @@ void app_config_to_claw(const app_config_t *config, app_claw_config_t *out)
     strlcpy(out->enabled_cap_groups, config->enabled_cap_groups, sizeof(out->enabled_cap_groups));
     strlcpy(out->llm_visible_cap_groups, config->llm_visible_cap_groups, sizeof(out->llm_visible_cap_groups));
     strlcpy(out->mcp_server_url, config->mcp_server_url, sizeof(out->mcp_server_url));
+    strlcpy(out->mcp_bearer_token, config->mcp_bearer_token, sizeof(out->mcp_bearer_token));
     strlcpy(out->enabled_lua_modules, config->enabled_lua_modules, sizeof(out->enabled_lua_modules));
 }
 

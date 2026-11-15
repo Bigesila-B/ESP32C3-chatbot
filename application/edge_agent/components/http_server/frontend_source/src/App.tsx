@@ -1,9 +1,10 @@
+import { ArrowLeft } from 'lucide-solid';
 import { createEffect, createSignal, lazy, onCleanup, onMount, Show, Suspense } from 'solid-js';
 import type { Component } from 'solid-js';
 
 import { fetchStatus, restartDevice } from './api/client';
 import { Layout } from './components/layout/Layout';
-import { LEAF_IDS } from './components/layout/Sidebar';
+import { ENHANCEMENT_PAGES, ROUTE_IDS } from './components/layout/Sidebar';
 import { RestartOverlay, type RestartOverlayState } from './components/system/RestartOverlay';
 import { Banner } from './components/ui/Banner';
 import { ToastViewport } from './components/ui/ToastViewport';
@@ -22,6 +23,9 @@ const WebReqPage = lazy(() =>
   import('./pages/WebReqPage').then((mod) => ({ default: mod.WebReqPage })),
 );
 const McpPage = lazy(() => import('./pages/McpPage').then((mod) => ({ default: mod.McpPage })));
+const EnhancementsPage = lazy(() =>
+  import('./pages/EnhancementsPage').then((mod) => ({ default: mod.EnhancementsPage })),
+);
 const ChatHelpPage = lazy(() =>
   import('./pages/ChatHelpPage').then((mod) => ({ default: mod.ChatHelpPage })),
 );
@@ -59,7 +63,7 @@ function readTabFromHash(): RouteId {
   const hash = window.location.hash.replace(/^#\/?/, '');
   if (hash === 'search') return 'webreq';
   if (hash === 'start') return 'start';
-  return LEAF_IDS.includes(hash as TabId) ? (hash as TabId) : 'status';
+  return ROUTE_IDS.includes(hash as TabId) ? (hash as TabId) : 'status';
 }
 
 const App: Component = () => {
@@ -234,6 +238,15 @@ const App: Component = () => {
         when={currentTab() === 'start'}
         fallback={
           <Layout currentTab={currentTab() as TabId} onSelectTab={handleSelectTab}>
+            <Show when={ENHANCEMENT_PAGES.some((tab) => tab === currentTab())}>
+              <a
+                href="#enhancements"
+                class="mb-3 inline-flex min-h-9 items-center gap-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:underline"
+              >
+                <ArrowLeft class="h-4 w-4" aria-hidden="true" />
+                {t('enhancementsBack')}
+              </a>
+            </Show>
             <Show when={bootError()}>
               <div class="mb-4">
                 <Banner kind="error" message={bootError() ?? undefined} />
@@ -261,6 +274,11 @@ const App: Component = () => {
                   onRestartRequest={() => void handleRestartRequest({ reloadOnSuccess: true })}
                 />
               </Show>
+              <Show when={currentTab() === 'enhancements'}>
+                <EnhancementsPage
+                  onRestartRequest={() => void handleRestartRequest({ reloadOnSuccess: true })}
+                />
+              </Show>
               <Show when={currentTab() === 'mcp'}>
                 <McpPage />
               </Show>
@@ -279,7 +297,7 @@ const App: Component = () => {
                 />
               </Show>
               <Show when={currentTab() === 'skill-catalog'}>
-                <SkillCatalogPage />
+                <SkillCatalogPage onRestartRequest={() => void handleRestartRequest({ reloadOnSuccess: true })} />
               </Show>
               <Show when={currentTab() === 'skills'}>
                 <SkillsPage

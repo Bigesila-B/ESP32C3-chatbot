@@ -29,7 +29,13 @@
 #define CONFIG_FIELD(group, field) { \
     #field, (group), \
     offsetof(app_config_t, field), \
-    sizeof(((app_config_t *)0)->field) \
+    sizeof(((app_config_t *)0)->field), NULL \
+}
+
+#define CONFIG_SECRET_FIELD(group, field) { \
+    #field, (group), \
+    offsetof(app_config_t, field), \
+    sizeof(((app_config_t *)0)->field), #field "_set" \
 }
 
 typedef struct {
@@ -37,6 +43,7 @@ typedef struct {
     const char *group;
     size_t offset;
     size_t size;
+    const char *configured_flag;
 } config_field_def_t;
 
 static const config_field_def_t CONFIG_FIELDS[] = {
@@ -77,6 +84,7 @@ static const config_field_def_t CONFIG_FIELDS[] = {
 
 #if CONFIG_APP_CLAW_CAP_MCP_CLIENT
     CONFIG_FIELD("mcp",          mcp_server_url),
+    CONFIG_SECRET_FIELD("mcp",   mcp_bearer_token),
 #endif
 
     CONFIG_FIELD("capabilities", enabled_cap_groups),
@@ -134,7 +142,8 @@ static bool field_matches_filter(const config_field_def_t *field,
     if (groups_csv && csv_contains(groups_csv, field->group)) {
         return true;
     }
-    if (fields_csv && csv_contains(fields_csv, field->name)) {
+    if (fields_csv && (csv_contains(fields_csv, field->name) ||
+                       (field->configured_flag && csv_contains(fields_csv, field->configured_flag)))) {
         return true;
     }
     return false;
@@ -205,7 +214,12 @@ static esp_err_t emit_config(httpd_req_t *req,
         if (!field_matches_filter(field, groups_csv, fields_csv)) {
             continue;
         }
-        http_server_json_add_string(root, field->name, field_value(config, field));
+        const char *value = field_value(config, field);
+        if (field->configured_flag) {
+            cJSON_AddBoolToObject(root, field->configured_flag, value[0] != '\0');
+        } else {
+            http_server_json_add_string(root, field->name, value);
+        }
     }
 
     if (extra_meta) {
@@ -262,6 +276,9 @@ static esp_err_t config_get_handler(httpd_req_t *req)
                 if (entry) {
                     cJSON_AddStringToObject(entry, "name", field->name);
                     cJSON_AddStringToObject(entry, "group", field->group);
+                    if (field->configured_flag) {
+                        cJSON_AddBoolToObject(entry, "write_only", true);
+                    }
                     cJSON_AddItemToArray(fields, entry);
                 }
             }
@@ -327,6 +344,21 @@ static esp_err_t config_post_handler(httpd_req_t *req)
      * Empty string is a valid value (lets the client clear a slot). */
     size_t applied_count = 0;
 
+#if CONFIG_APP_CLAW_CAP_MCP_CLIENT
+    const cJSON *token = cJSON_GetObjectItemCaseSensitive(root, "mcp_bearer_token");
+    const char *url = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "mcp_server_url"));
+    bool update_mcp = token || url;
+    if (token && (cap_mcp_client_validate_bearer_token(cJSON_GetStringValue(token)) != ESP_OK ||
+                  (token->valuestring[0] && !(url ? url[0] : config->mcp_server_url[0])))) {
+        cJSON_Delete(root);
+        free(config);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid MCP Bearer token or missing server URL");
+    }
+    if (!token && url && strcmp(url, config->mcp_server_url) != 0) {
+        config->mcp_bearer_token[0] = '\0';
+    }
+#endif
+
     for (size_t i = 0; i < CONFIG_FIELD_COUNT; i++) {
         const config_field_def_t *field = &CONFIG_FIELDS[i];
         cJSON *item = cJSON_GetObjectItemCaseSensitive(root, field->name);
@@ -384,6 +416,11 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     }
 
     err = ctx->services.save_config(config);
+#if CONFIG_APP_CLAW_CAP_MCP_CLIENT
+    if (err == ESP_OK && update_mcp) {
+        err = app_config_mcp_update_default(config->mcp_server_url, config->mcp_bearer_token);
+    }
+#endif
     free(config);
     if (err != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save config");

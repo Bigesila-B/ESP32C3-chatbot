@@ -9,7 +9,6 @@ import { CollapsibleConfigBlock, StaticConfigBlock } from '../components/ui/Conf
 import { TextInput, SelectInput } from '../components/ui/FormField';
 import { SavePanel } from '../components/ui/SavePanel';
 import { Banner } from '../components/ui/Banner';
-import { Switch } from '../components/ui/Switch';
 import { RestartConfirmModal } from '../components/system/RestartConfirmModal';
 import { pushToast } from '../state/toast';
 
@@ -20,7 +19,6 @@ type BasicForm = {
   ap_password: string;
   ap_behavior: string;
   time_timezone: string;
-  show_tool_progress: boolean;
 };
 
 function networkSettingsChanged(form: BasicForm, config: Partial<AppConfig>) {
@@ -36,7 +34,7 @@ function networkSettingsChanged(form: BasicForm, config: Partial<AppConfig>) {
 export const BasicPage: Component<{ onRestartRequest: () => void }> = (props) => {
   const tab = createConfigTab<BasicForm>({
     tab: 'basic',
-    groups: ['wifi', 'time', 'chat'],
+    groups: ['wifi', 'time'],
     toForm: (config: Partial<AppConfig>) => ({
       wifi_ssid: config.wifi_ssid ?? '',
       wifi_password: config.wifi_password ?? '',
@@ -44,11 +42,10 @@ export const BasicPage: Component<{ onRestartRequest: () => void }> = (props) =>
       ap_password: config.ap_password ?? '',
       ap_behavior: config.ap_behavior ?? 'keep',
       time_timezone: config.time_timezone ?? '',
-      show_tool_progress: config.show_tool_progress === 'true' || config.show_tool_progress === '1',
     }),
     fromForm: (form) => {
       const config = appConfig();
-      const patch: Partial<AppConfig> = { show_tool_progress: String(form.show_tool_progress) };
+      const patch: Partial<AppConfig> = {};
       if (networkSettingsChanged(form, config)) {
         patch.wifi_ssid = form.wifi_ssid.trim();
         patch.wifi_password = form.wifi_password;
@@ -142,15 +139,6 @@ export const BasicPage: Component<{ onRestartRequest: () => void }> = (props) =>
         </div>
       </Show>
       <div class="divide-y divide-[var(--color-border-subtle)] mt-2">
-        <StaticConfigBlock title={t('sectionChat') as string}>
-          <Switch
-            checked={tab.form.show_tool_progress}
-            disabled={tab.loading() || tab.saving()}
-            label={t('showToolProgress')}
-            hint={t('showToolProgressHint')}
-            onChange={(checked) => tab.setForm('show_tool_progress', checked)}
-          />
-        </StaticConfigBlock>
         <StaticConfigBlock title={t('sectionWifi') as string}>
           <div class="grid gap-3 sm:grid-cols-2 pt-2">
             <TextInput

@@ -104,6 +104,14 @@ esp_err_t claw_skill_add_directory(const char *dir);
 esp_err_t claw_skill_reload_registry(void);
 
 /**
+ * @brief Validate a staged <skill_id>/SKILL.md against the installed registry without activating it.
+ *
+ * @return ESP_OK if installable, ESP_ERR_INVALID_STATE if already installed or uninitialized,
+ *         or an error from reading and validating the skill files.
+ */
+esp_err_t claw_skill_validate_install(const char *staging_root, const char *skill_id);
+
+/**
  * @brief  Render the skill catalog as a plain-text list for the prompt layer
  *
  * @param[out]  buf   Destination buffer

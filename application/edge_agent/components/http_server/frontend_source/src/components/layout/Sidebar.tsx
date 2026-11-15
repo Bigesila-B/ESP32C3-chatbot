@@ -4,10 +4,8 @@ import {
   Bot,
   DatabaseZap,
   Folder,
-  List,
   MessageSquareCode,
   MessagesSquare,
-  Plug,
   Search,
   Settings,
   Sparkles,
@@ -27,11 +25,9 @@ const IconWifi: Component = () => <WifiPen class={iconClass} />;
 const IconLlm: Component = () => <Bot class={iconClass} />;
 const IconIm: Component = () => <MessageSquareCode class={iconClass} />;
 const IconSearch: Component = () => <Search class={iconClass} />;
-const IconMcp: Component = () => <Plug class={iconClass} />;
-const IconCommands: Component = () => <List class={iconClass} />;
 const IconMemory: Component = () => <DatabaseZap class={iconClass} />;
 const IconCaps: Component = () => <Blocks class={iconClass} />;
-const IconSkillCatalog: Component = () => <Sparkles class={iconClass} />;
+const IconEnhancements: Component = () => <Sparkles class={iconClass} />;
 const IconSkills: Component = () => <SquareFunction class={iconClass} />;
 const IconFiles: Component = () => <Folder class={iconClass} />;
 const IconWebIm: Component = () => <MessagesSquare class={iconClass} />;
@@ -45,15 +41,14 @@ export type LeafNode = {
     | 'navLlm'
     | 'navIm'
     | 'navWebReq'
-    | 'navMcp'
-    | 'navCommands'
+    | 'navEnhancements'
     | 'navMemory'
     | 'navCapabilities'
-    | 'navSkillCatalog'
     | 'navLuaModules'
     | 'navFiles'
     | 'navWebIm';
   icon: Component;
+  relatedTabs?: readonly TabId[];
 };
 export type GroupNode = {
   kind: 'group';
@@ -64,8 +59,17 @@ export type GroupNode = {
 };
 export type NavNode = LeafNode | GroupNode;
 
+export const ENHANCEMENT_PAGES: readonly TabId[] = ['mcp', 'skill-catalog', 'commands'];
+
 export const NAV_TREE: NavNode[] = [
   { kind: 'leaf', id: 'status', labelKey: 'navStatus', icon: IconStatus },
+  {
+    kind: 'leaf',
+    id: 'enhancements',
+    labelKey: 'navEnhancements',
+    icon: IconEnhancements,
+    relatedTabs: ENHANCEMENT_PAGES,
+  },
   {
     kind: 'group',
     id: 'basic-settings',
@@ -76,25 +80,22 @@ export const NAV_TREE: NavNode[] = [
       { kind: 'leaf', id: 'llm', labelKey: 'navLlm', icon: IconLlm },
       { kind: 'leaf', id: 'im', labelKey: 'navIm', icon: IconIm },
       { kind: 'leaf', id: 'webreq', labelKey: 'navWebReq', icon: IconSearch },
-      { kind: 'leaf', id: 'mcp', labelKey: 'navMcp', icon: IconMcp },
-      { kind: 'leaf', id: 'commands', labelKey: 'navCommands', icon: IconCommands },
     ],
   },
   { kind: 'leaf', id: 'memory', labelKey: 'navMemory', icon: IconMemory },
   { kind: 'leaf', id: 'webim', labelKey: 'navWebIm', icon: IconWebIm },
   { kind: 'leaf', id: 'capabilities', labelKey: 'navCapabilities', icon: IconCaps },
-  { kind: 'leaf', id: 'skill-catalog', labelKey: 'navSkillCatalog', icon: IconSkillCatalog },
   { kind: 'leaf', id: 'skills', labelKey: 'navLuaModules', icon: IconSkills },
   { kind: 'leaf', id: 'files', labelKey: 'navFiles', icon: IconFiles },
 ];
 
-export const LEAF_IDS = collectLeafIds(NAV_TREE);
+export const ROUTE_IDS = collectRouteIds(NAV_TREE);
 
-function collectLeafIds(nodes: NavNode[]): TabId[] {
+function collectRouteIds(nodes: NavNode[]): TabId[] {
   const out: TabId[] = [];
   for (const node of nodes) {
-    if (node.kind === 'leaf') out.push(node.id);
-    else out.push(...collectLeafIds(node.children));
+    if (node.kind === 'leaf') out.push(node.id, ...(node.relatedTabs ?? []));
+    else out.push(...collectRouteIds(node.children));
   }
   return out;
 }
@@ -175,43 +176,48 @@ export const Sidebar: Component<SidebarProps> = (props) => {
     props.onCloseMobile?.();
   };
 
-  const renderLeaf = (leaf: LeafNode, options: { indent?: boolean }) => (
-    <button
-      type="button"
-      class={[
-        'relative w-full flex items-center gap-3 rounded-[var(--radius-sm)] transition text-left',
-        isCollapsed()
-          ? 'justify-center py-2 px-0'
-          : options.indent
-            ? 'px-3 py-2 pl-8'
-            : 'px-3 py-2',
-        props.current === leaf.id
-          ? 'bg-[var(--color-accent)]/15 text-[var(--color-text-primary)] ring-1 ring-[var(--color-accent-soft)]/40'
-          : 'text-[var(--color-text-secondary)] hover:bg-white/5 hover:text-[var(--color-text-primary)]',
-      ].join(' ')}
-      onClick={() => handleSelect(leaf.id)}
-      title={t(leaf.labelKey) as string}
-    >
-      <span class="relative inline-flex">
-        <leaf.icon />
-        <Show when={isCollapsed() && isDirty(leaf.id)}>
-          <span
-            class="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-[var(--color-orange)]"
-            title={t('unsavedIndicator') as string}
-          />
+  const renderLeaf = (leaf: LeafNode, options: { indent?: boolean }) => {
+    const active = () => props.current === leaf.id || leaf.relatedTabs?.includes(props.current);
+    const dirty = () => isDirty(leaf.id) || leaf.relatedTabs?.some(isDirty);
+    return (
+      <button
+        type="button"
+        class={[
+          'relative w-full flex items-center gap-3 rounded-[var(--radius-sm)] transition text-left',
+          isCollapsed()
+            ? 'justify-center py-2 px-0'
+            : options.indent
+              ? 'px-3 py-2 pl-8'
+              : 'px-3 py-2',
+          active()
+            ? 'bg-[var(--color-accent)]/15 text-[var(--color-text-primary)] ring-1 ring-[var(--color-accent-soft)]/40'
+            : 'text-[var(--color-text-secondary)] hover:bg-white/5 hover:text-[var(--color-text-primary)]',
+        ].join(' ')}
+        onClick={() => handleSelect(leaf.id)}
+        aria-current={active() ? (props.current === leaf.id ? 'page' : 'location') : undefined}
+        title={t(leaf.labelKey) as string}
+      >
+        <span class="relative inline-flex">
+          <leaf.icon />
+          <Show when={isCollapsed() && dirty()}>
+            <span
+              class="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-[var(--color-orange)]"
+              title={t('unsavedIndicator') as string}
+            />
+          </Show>
+        </span>
+        <Show when={!isCollapsed()}>
+          <span class="flex-1 text-[0.9rem] truncate">{t(leaf.labelKey)}</span>
+          <Show when={dirty()}>
+            <span
+              class="w-2 h-2 rounded-full bg-[var(--color-orange)]"
+              title={t('unsavedIndicator') as string}
+            />
+          </Show>
         </Show>
-      </span>
-      <Show when={!isCollapsed()}>
-        <span class="flex-1 text-[0.9rem] truncate">{t(leaf.labelKey)}</span>
-        <Show when={isDirty(leaf.id)}>
-          <span
-            class="w-2 h-2 rounded-full bg-[var(--color-orange)]"
-            title={t('unsavedIndicator') as string}
-          />
-        </Show>
-      </Show>
-    </button>
-  );
+      </button>
+    );
+  };
 
   const renderGroup = (group: GroupNode) => {
     const isOpen = () => expanded().has(group.id) || isCollapsed();

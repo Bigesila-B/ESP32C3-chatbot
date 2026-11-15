@@ -23,12 +23,27 @@ ESP-Claw 通过 `cap_mcp_client` 和 `cap_mcp_server` 两个组件实现 [Model 
 
 ## cap_mcp_client
 
+### 连接服务
+
+在「增强功能 → MCP 设置」可添加最多四个具名服务。每张卡片均可折叠、单独测试连接和设置 Bearer Token。通过「设为默认」选择默认服务，然后保存。原有的单服务设置会显示在第一张卡片中。公网连接优先使用 HTTPS。
+
+在「Capabilities 管理」为 MCP Client 勾选「LLM 可见」，更改权限后重启。聊天时可用保存的名称指定服务。设备用 `mcp_list_servers` 查看名称，用 `mcp_list_tools` 检查连接。「增强功能 → 技能列表」中的 `cap_mcp_client` 提供使用说明。
+
+- 支持 Streamable HTTP 的 JSON 及 SSE 响应、无状态和有状态会话，也可连接旧版 HTTP＋SSE 服务。
+- 支持 MCP 2025-03-26、2025-06-18、2025-11-25 以及旧版 HTTP＋SSE 的 2024-11-05。客户端用于列出和调用远程工具。桌面 `stdio` 服务需要 HTTP 桥接。
+- 任何工具都能通过 `image_delivery` 发送直接返回的图片，或按服务提供的任务查询工具跟进结果。设备可同时在后台跟进两个生图任务，等待约五分钟并把结果发回原聊天。
+- Web、QQ 和 Telegram 可直接显示支持的图床图片，其他通道收到下载链接。在原聊天发送 `/mcp last-image` 可重发并刷新任务的临时链接。设备在内存中保留最近登记的四个聊天，重启后清空。
+- Web 支持 MCP 内嵌的 PNG、JPEG、GIF 和 WebP，单张最多 64 KiB，最近 4 张保存在 PSRAM，重启后清空。每个 MCP JSON 响应或 SSE 事件最多 96 KiB。
+- `/mcp models` 直接查询默认服务公开的 `list_models` 目录。脚本兼容简单列表和支持 `kind`、`limit`、`offset` 的分页目录。其他模型目录可按服务定义调用。
+
 ### 工具描述
 
 | 工具 ID | 说明 |
 |---------|------|
+| `mcp_list_servers` | 列出已保存的 MCP 服务名称和默认服务 |
 | `mcp_list_tools` | 列出远程 MCP 服务器上的可用工具 |
 | `mcp_call_tool` | 调用远程 MCP 服务器上的指定工具 |
+| `mcp_last_image` | 取回并重发当前聊天中最近生成的图片 |
 | `mcp_discover` | 发现局域网内广播的 MCP 服务器 |
 
 ### 工具参数
@@ -37,18 +52,43 @@ ESP-Claw 通过 `cap_mcp_client` 和 `cap_mcp_server` 两个组件实现 [Model 
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `server_url` | string | ✅ | MCP 服务器 URL |
+| `server` | string | | 已保存的服务名称，省略时使用第一项 |
+| `server_url` | string | | 直接指定服务 URL，替代服务名称 |
 | `endpoint` | string | | MCP endpoint 路径 |
 | `cursor` | string | | 分页游标 |
+| `tool_name` | string | | 查看指定工具声明的输入和输出结构 |
 
 #### `mcp_call_tool`
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `server_url` | string | ✅ | MCP 服务器 URL |
+| `server` | string | | 已保存的服务名称，省略时使用第一项 |
+| `server_url` | string | | 直接指定服务 URL，替代服务名称 |
 | `tool_name` | string | ✅ | 要调用的工具名称 |
 | `endpoint` | string | | MCP endpoint 路径 |
 | `arguments` | object | | 传递给工具的参数 |
+| `image_delivery` | object | | 将调用结果的图片发到原聊天，可指定后台任务的查询方式 |
+
+用 `image_delivery: {}` 发送工具直接返回的图片。对于异步生图，`status_tool` 填写服务公开的只读查询工具，`id_field` 和 `id_argument` 对应任务编号在返回值中的路径和在查询工具中的参数名，默认均为 `job_id`。查询工具只需以任务编号作为必填参数。
+
+例如，一个服务用 `render` 生成图像，用 `task_status` 查任务，并返回结果链接数组。按服务实际提供的工具和字段填写。
+
+```json
+{
+  "server": "示例图像服务",
+  "tool_name": "render",
+  "arguments": {"prompt": "一只在窗边睡觉的猫"},
+  "image_delivery": {
+    "status_tool": "task_status",
+    "id_field": "task.id",
+    "id_argument": "task_id",
+    "status_field": "state",
+    "image_field": "result.urls"
+  }
+}
+```
+
+`status_field` 默认是 `status`，支持 `completed`、`succeeded`、`ready` 等完成状态。用 `image_field` 指定想发送的图片 URL 或 URL 数组。兼容 `generate_image` 与 `get_job(job_id)` 这一组合。服务声明必填的字符串幂等参数可通过 `request_id_argument` 自动补齐，兼容组合会尝试补 `request_id`。
 
 #### `mcp_discover`
 
@@ -62,8 +102,8 @@ ESP-Claw 通过 `cap_mcp_client` 和 `cap_mcp_server` 两个组件实现 [Model 
 | 属性 | 值 |
 |------|------|
 | Group ID | `cap_mcp_client` |
-| 默认 LLM 可见 | ❌（需通过 Skill 激活） |
-| 工具数量 | 3 |
+| 默认 LLM 可见 | ❌（在「Capabilities 管理」为 LLM 启用后重启） |
+| 工具数量 | 5 |
 
 ## cap_mcp_server
 

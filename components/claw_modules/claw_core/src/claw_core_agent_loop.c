@@ -418,6 +418,12 @@ void claw_core_agent_loop_task(void *arg)
 
         if (err == ESP_OK && response.view.text) {
             esp_err_t persist_err;
+            xSemaphoreTake(core->inflight_lock, portMAX_DELAY);
+            cJSON *reply_images = core->reply_images;
+            core->reply_images = NULL;
+            xSemaphoreGive(core->inflight_lock);
+            claw_core_append_reply_images(reply_images, &response.view.text);
+            cJSON_Delete(reply_images);
 
             response.view.status = CLAW_CORE_RESPONSE_STATUS_OK;
             persist_err = claw_core_persist_context_final_if_configured(core,
@@ -449,6 +455,8 @@ finish_request:
         if (xSemaphoreTake(core->inflight_lock, portMAX_DELAY) == pdTRUE) {
             bool was_cancelled = core->inflight_abort &&
                                  core->inflight_abort_reason == CLAW_CORE_CONTROL_ABORT_REASON_CANCEL;
+            cJSON *unused_images = core->reply_images;
+            core->reply_images = NULL;
             core->inflight_request_id = 0;
             core->inflight_session_id[0] = '\0';
             core->agent_loop_phase = CLAW_CORE_AGENT_LOOP_PHASE_IDLE;
@@ -456,6 +464,7 @@ finish_request:
             core->inflight_abort_reason = CLAW_CORE_CONTROL_ABORT_REASON_NONE;
             claw_core_ingress_clear_insert_queue_locked(core);
             xSemaphoreGive(core->inflight_lock);
+            cJSON_Delete(unused_images);
             if (was_cancelled && err != ESP_OK && response.view.error_message) {
                 /* Replace the generic transport error with a clearer one. */
                 free(response.view.error_message);

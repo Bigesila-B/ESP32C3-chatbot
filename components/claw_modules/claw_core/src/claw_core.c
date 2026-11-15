@@ -39,6 +39,7 @@ static void claw_core_free_runtime(claw_core_state_t *core)
 
     free_context_provider_storage(core);
     free(core->system_prompt);
+    cJSON_Delete(core->reply_images);
     claw_core_llm_config_free(&core->llm_config);
     claw_llm_runtime_deinit(core->llm_runtime);
     if (core->llm_lock) {

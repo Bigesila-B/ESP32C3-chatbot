@@ -14,6 +14,82 @@
 
 static const char *TAG = "claw_core";
 
+#define CLAW_CORE_REPLY_IMAGE_COUNT 4
+#define CLAW_CORE_REPLY_IMAGE_URL_MAX 1500
+
+esp_err_t claw_core_add_reply_image(claw_core_handle_t core, uint32_t request_id, const char *url)
+{
+    if (!core || !core->inflight_lock || !request_id || !url || !url[0] ||
+            strlen(url) > CLAW_CORE_REPLY_IMAGE_URL_MAX || strpbrk(url, "<> \t\r\n")) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    xSemaphoreTake(core->inflight_lock, portMAX_DELAY);
+    esp_err_t err = ESP_ERR_INVALID_STATE;
+    if (core->inflight_request_id == request_id) {
+        if (!core->reply_images) {
+            core->reply_images = cJSON_CreateArray();
+        }
+        err = core->reply_images ? ESP_ERR_INVALID_SIZE : ESP_ERR_NO_MEM;
+        cJSON *item;
+        cJSON_ArrayForEach(item, core->reply_images) {
+            if (strcmp(item->valuestring, url) == 0) {
+                err = ESP_OK;
+                break;
+            }
+        }
+        if (err == ESP_ERR_INVALID_SIZE && cJSON_GetArraySize(core->reply_images) < CLAW_CORE_REPLY_IMAGE_COUNT) {
+            cJSON *image = cJSON_CreateString(url);
+            if (image && cJSON_AddItemToArray(core->reply_images, image)) {
+                err = ESP_OK;
+            } else {
+                cJSON_Delete(image);
+                err = ESP_ERR_NO_MEM;
+            }
+        }
+    }
+    xSemaphoreGive(core->inflight_lock);
+    return err;
+}
+
+static bool reply_has_image(const char *text, const char *url)
+{
+    const char *start = text;
+    size_t url_len = strlen(url);
+    while ((start = strstr(start, "!["))) {
+        const char *end = start + strcspn(start, "\r\n");
+        const char *target = strstr(start + 2, "](");
+        if (target && target < end) {
+            target += 2;
+            bool angled = *target == '<';
+            target += angled;
+            if ((size_t)(end - target) >= url_len + (angled ? 2 : 1) &&
+                    memcmp(target, url, url_len) == 0 &&
+                    (angled ? target[url_len] == '>' && target[url_len + 1] == ')'
+                            : target[url_len] == ')')) {
+                return true;
+            }
+        }
+        start += 2;
+    }
+    return false;
+}
+
+void claw_core_append_reply_images(cJSON *images, char **reply)
+{
+    cJSON *item;
+    cJSON_ArrayForEach(item, images) {
+        const char *url = item->valuestring;
+        const char *text = *reply ? *reply : "";
+        if (!reply_has_image(text, url)) {
+            char *next = NULL;
+            if (asprintf(&next, "%s%s![MCP image](<%s>)", text, text[0] ? "\n\n" : "", url) >= 0) {
+                free(*reply);
+                *reply = next;
+            }
+        }
+    }
+}
+
 void claw_core_free_cached_contexts(claw_core_cached_context_t *contexts, size_t count)
 {
     size_t i;

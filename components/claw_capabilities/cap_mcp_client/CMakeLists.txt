@@ -2,6 +2,8 @@ idf_component_register(
     SRCS
         "src/cap_mcp_client.c"
         "src/cap_mcp_client_core.c"
+        "src/cap_mcp_client_result.c"
+        "src/cap_mcp_client_image_job.c"
         "src/cap_mcp_discover_core.c"
     INCLUDE_DIRS
         "include"
@@ -9,8 +11,9 @@ idf_component_register(
         "src/priv_include"
     REQUIRES
         claw_cap
-        esp_http_client
-        mcp-c-sdk
     PRIV_REQUIRES
+        esp_http_client
+        esp_timer
         http_parser
+        mbedtls
 )

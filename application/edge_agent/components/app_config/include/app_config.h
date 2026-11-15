@@ -56,6 +56,7 @@ typedef struct {
     char search_tavily_key[APP_CONFIG_STR_LEN];
     char search_http_allowlist[APP_CONFIG_STR_LEN];
     char mcp_server_url[APP_CONFIG_STR_LEN];
+    char mcp_bearer_token[APP_CONFIG_STR_LEN];
     char enabled_cap_groups[APP_CONFIG_STR_LEN];
     char llm_visible_cap_groups[APP_CONFIG_STR_LEN];
     char enabled_lua_modules[APP_CONFIG_STR_LEN];
@@ -70,6 +71,13 @@ esp_err_t app_config_validate_wifi(const app_config_t *config, const char **mess
 void app_config_to_claw(const app_config_t *config, app_claw_config_t *out);
 const char *app_config_get_timezone(const app_config_t *config);
 bool app_config_show_tool_progress(const app_config_t *config);
+
+#if CONFIG_APP_CLAW_CAP_MCP_CLIENT
+struct cJSON;
+struct cJSON *app_config_mcp_servers(void);
+esp_err_t app_config_mcp_replace(const struct cJSON *input);
+esp_err_t app_config_mcp_update_default(const char *url, const char *token);
+#endif
 
 #ifdef __cplusplus
 }

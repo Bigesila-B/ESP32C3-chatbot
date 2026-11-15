@@ -25,6 +25,7 @@ import { Switch } from '../components/ui/Switch';
 import { t, tf } from '../i18n';
 import { pushToast } from '../state/toast';
 import { ChatHelpMessage } from '../components/webim/ChatHelpMessage';
+import { ChatImageMessage } from '../components/webim/ChatImageMessage';
 import { imageUploadSize, prepareImageUpload } from '../utils/imageUpload';
 
 const LS_CHAT_ID = 'esp-claw-webim-chat-id';
@@ -353,14 +354,18 @@ export const WebImPage: Component = () => {
     teardownWs();
   });
 
-  createEffect(() => {
-    messages().length;
-    markdownPreview();
+  const scrollToLatest = () => {
     requestAnimationFrame(() => {
       if (messagesRef) {
         messagesRef.scrollTop = messagesRef.scrollHeight;
       }
     });
+  };
+
+  createEffect(() => {
+    messages().length;
+    markdownPreview();
+    scrollToLatest();
   });
 
   const onPickFile = async (ev: Event) => {
@@ -504,7 +509,7 @@ export const WebImPage: Component = () => {
             class="relative flex min-h-0 flex-1 overflow-auto p-4 flex-col gap-3"
           >
             <For each={messages()}>
-              {(m) => (
+              {(m, index) => (
                 <div
                   class={[
                     'flex max-w-[min(100%,36rem)] items-start gap-2',
@@ -540,7 +545,20 @@ export const WebImPage: Component = () => {
                   >
                     <Show
                       when={m.kind === 'chat_help'}
-                      fallback={<MarkdownMessage preview={markdownPreview()} text={m.text} />}
+                      fallback={(
+                        <Show
+                          when={m.role === 'assistant'}
+                          fallback={<MarkdownMessage preview={markdownPreview()} text={m.text} />}
+                        >
+                          <ChatImageMessage
+                            text={m.text}
+                            renderText={(value) => <MarkdownMessage preview={markdownPreview()} text={value} />}
+                            onImageLoad={() => {
+                              if (index() === messages().length - 1) scrollToLatest();
+                            }}
+                          />
+                        </Show>
+                      )}
                     >
                       <ChatHelpMessage text={m.text} />
                     </Show>

@@ -30,6 +30,7 @@
 #include "freertos/idf_additions.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "http_parser.h"
 #include "mbedtls/base64.h"
 
 static const char *TAG = "cap_im_qq";
@@ -60,6 +61,7 @@ static const char *TAG = "cap_im_qq";
 #define CAP_IM_QQ_INTENTS ((1 << 30) | (1 << 25))
 #define CAP_IM_QQ_FILE_TYPE_IMAGE 1
 #define CAP_IM_QQ_FILE_TYPE_FILE  4
+#define CAP_IM_QQ_IMAGE_URL_MAX   1500
 
 typedef struct {
     char *buf;
@@ -1370,6 +1372,20 @@ static esp_err_t cap_im_qq_send_media_message(const char *chat_id,
     return err;
 }
 
+static bool cap_im_qq_is_image_url(const char *path, uint32_t file_type)
+{
+    if (file_type != CAP_IM_QQ_FILE_TYPE_IMAGE ||
+            (strncmp(path, "https://", 8) != 0 && strncmp(path, "http://", 7) != 0) ||
+            strlen(path) > CAP_IM_QQ_IMAGE_URL_MAX || strpbrk(path, "#\\<> \t\r\n")) {
+        return false;
+    }
+
+    struct http_parser_url parsed;
+    http_parser_url_init(&parsed);
+    return http_parser_parse_url(path, strlen(path), 0, &parsed) == 0 &&
+           (parsed.field_set & (1 << UF_HOST)) && !(parsed.field_set & (1 << UF_USERINFO));
+}
+
 static esp_err_t cap_im_qq_upload_media(const char *chat_id,
                                         const char *path,
                                         uint32_t file_type,
@@ -1389,20 +1405,23 @@ static esp_err_t cap_im_qq_upload_media(const char *chat_id,
     if (!chat_id || !path || !path[0] || !out_file_info) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (stat(path, &st) != 0) {
-        return errno == ENOENT ? ESP_ERR_NOT_FOUND : ESP_FAIL;
-    }
-    if (!S_ISREG(st.st_mode)) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (st.st_size <= 0) {
-        return ESP_ERR_INVALID_SIZE;
-    }
+    bool from_url = cap_im_qq_is_image_url(path, file_type);
+    if (!from_url) {
+        if (stat(path, &st) != 0) {
+            return errno == ENOENT ? ESP_ERR_NOT_FOUND : ESP_FAIL;
+        }
+        if (!S_ISREG(st.st_mode)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        if (st.st_size <= 0) {
+            return ESP_ERR_INVALID_SIZE;
+        }
 
-    file_b64 = cap_im_qq_file_to_base64(path);
-    if (!file_b64) {
-        ESP_LOGE(TAG, "Failed to encode QQ media file: %s", path);
-        return ESP_FAIL;
+        file_b64 = cap_im_qq_file_to_base64(path);
+        if (!file_b64) {
+            ESP_LOGE(TAG, "Failed to encode QQ media file: %s", path);
+            return ESP_FAIL;
+        }
     }
 
     body = cJSON_CreateObject();
@@ -1410,9 +1429,13 @@ static esp_err_t cap_im_qq_upload_media(const char *chat_id,
         free(file_b64);
         return ESP_ERR_NO_MEM;
     }
-    cJSON_AddNumberToObject(body, "file_type", (double)file_type);
-    cJSON_AddBoolToObject(body, "srv_send_msg", false);
-    cJSON_AddStringToObject(body, "file_data", file_b64);
+    if (!cJSON_AddNumberToObject(body, "file_type", (double)file_type) ||
+            !cJSON_AddBoolToObject(body, "srv_send_msg", false) ||
+            !cJSON_AddStringToObject(body, from_url ? "url" : "file_data", from_url ? path : file_b64)) {
+        cJSON_Delete(body);
+        free(file_b64);
+        return ESP_ERR_NO_MEM;
+    }
     if (file_type == CAP_IM_QQ_FILE_TYPE_FILE) {
         base_name = cap_im_qq_basename(path);
         if (base_name && base_name[0]) {
@@ -1963,7 +1986,7 @@ static const claw_cap_descriptor_t s_qq_descriptors[] = {
         .id = "qq_send_image",
         .name = "qq_send_image",
         .family = "im",
-        .description = "Send an image file from a local path to a QQ chat.",
+        .description = "Send a PNG/JPEG image to QQ. The path can be a local file or a public HTTP(S) image URL from a tool.",
         .kind = CLAW_CAP_KIND_CALLABLE,
         .cap_flags = CLAW_CAP_FLAG_CALLABLE_BY_LLM,
         .input_schema_json =

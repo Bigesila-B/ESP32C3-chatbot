@@ -2,6 +2,7 @@ import { createSignal } from 'solid-js';
 import { createStore } from 'solid-js/store';
 import {
   fetchCapabilities,
+  fetchConfigFields,
   fetchConfigGroups,
   fetchLuaModules,
   fetchStatus,
@@ -9,6 +10,7 @@ import {
   type AppConfig,
   type CapabilityItem,
   type ConfigGroup,
+  type ConfigPatch,
   type LuaModuleItem,
   type StatusInfo,
 } from '../api/client';
@@ -50,6 +52,10 @@ const [loadedGroups, setLoadedGroups] = createSignal(new Set<ConfigGroup>());
 const pending = new Map<ConfigGroup, Promise<void>>();
 
 export const appConfig = () => configStore;
+
+export async function reloadConfigFields(fields: (keyof AppConfig)[]) {
+  setConfigStore(await fetchConfigFields(fields));
+}
 
 export function isGroupLoaded(group: ConfigGroup) {
   return loadedGroups().has(group);
@@ -96,12 +102,18 @@ export async function reloadConfigGroups(groups: ConfigGroup[]): Promise<void> {
 }
 
 /** Apply a locally-known patch to the cache after a successful save. */
-export function patchConfigLocal(patch: Partial<AppConfig>) {
-  setConfigStore(patch);
+export function patchConfigLocal(patch: ConfigPatch) {
+  const { mcp_bearer_token, ...values } = patch;
+  const mcpUrlChanged = values.mcp_server_url !== undefined && values.mcp_server_url !== configStore.mcp_server_url;
+  if (mcp_bearer_token !== undefined || mcpUrlChanged) {
+    setConfigStore({ ...values, mcp_bearer_token_set: Boolean(mcp_bearer_token) });
+  } else {
+    setConfigStore(values);
+  }
 }
 
-export async function saveConfig(patch: Partial<AppConfig>) {
+export async function saveConfig(patch: ConfigPatch) {
   const result = await saveConfigPatch(patch);
-  setConfigStore(patch);
+  patchConfigLocal(patch);
   return result;
 }

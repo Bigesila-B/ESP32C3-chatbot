@@ -62,7 +62,14 @@ typedef struct {
     size_t limit;
 } claw_memory_query_t;
 
+typedef struct {
+    size_t estimated_tokens;
+    uint32_t window_tokens;
+} claw_memory_session_usage_t;
+
 esp_err_t claw_memory_init(const claw_memory_config_t *config);
+/* Refresh the auto-detected window after the running model changes. */
+void claw_memory_set_context_model(const char *model);
 esp_err_t claw_memory_register_group(void);
 esp_err_t claw_memory_store(const claw_memory_item_t *item);
 esp_err_t claw_memory_store_with_result(claw_memory_item_t *item, bool *out_changed);
@@ -83,6 +90,9 @@ esp_err_t claw_memory_persist_context_callback(const claw_core_context_persist_b
                                                void *user_ctx);
 esp_err_t claw_memory_delete_session_history(const char *session_id,
                                              bool *out_deleted_any);
+
+/* Estimate persisted session history and its summary with the active context window. */
+esp_err_t claw_memory_get_session_usage(const char *session_id, claw_memory_session_usage_t *out);
 esp_err_t claw_memory_request_gate_callback(const claw_core_request_t *request,
                                             char *reject_message,
                                             size_t reject_message_size,

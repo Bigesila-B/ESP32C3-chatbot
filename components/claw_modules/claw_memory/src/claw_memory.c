@@ -314,8 +314,7 @@ esp_err_t claw_memory_init(const claw_memory_config_t *config)
     s_memory.max_tool_iterations = config->max_tool_iterations ?
         config->max_tool_iterations : CLAW_MEMORY_DEFAULT_MAX_TOOL_ITERATIONS;
     s_memory.backend_format = claw_memory_backend_format_from_type(config->llm.backend_type);
-    /* 记录模型名，供会话压缩时自动匹配上下文窗口大小 */
-    safe_copy(s_memory.llm_model, sizeof(s_memory.llm_model), config->llm.model);
+    claw_memory_set_context_model(config->llm.model);
     /* 用户显式配置的上下文窗口，0 表示沿用自动匹配 */
     s_memory.context_window_tokens = (uint32_t)config->context_window_tokens;
     s_memory.next_memory_seq = claw_memory_now_sec() % 10000U;

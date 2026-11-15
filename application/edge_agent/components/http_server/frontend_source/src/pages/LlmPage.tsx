@@ -180,7 +180,6 @@ type LlmForm = {
   llm_model: string;
   llm_timeout_ms: string;
   llm_max_tokens: string;
-  llm_context_window: string;
   llm_backend_type: string;
   llm_base_url: string;
   llm_auth_type: string;
@@ -233,7 +232,6 @@ export const LlmPage: Component = () => {
       llm_model: config.llm_model ?? '',
       llm_timeout_ms: config.llm_timeout_ms ?? '',
       llm_max_tokens: config.llm_max_tokens ?? '',
-      llm_context_window: config.llm_context_window ?? '',
       llm_backend_type: config.llm_backend_type ?? '',
       llm_base_url: config.llm_base_url ?? '',
       llm_auth_type: config.llm_auth_type ?? '',
@@ -248,7 +246,6 @@ export const LlmPage: Component = () => {
       llm_model: form.llm_model.trim(),
       llm_timeout_ms: form.llm_timeout_ms.trim(),
       llm_max_tokens: form.llm_max_tokens.trim(),
-      llm_context_window: form.llm_context_window.trim(),
       llm_backend_type: form.llm_backend_type.trim(),
       llm_base_url: form.llm_base_url.trim(),
       llm_auth_type: form.llm_auth_type.trim(),
@@ -406,13 +403,6 @@ export const LlmPage: Component = () => {
                 placeholder={t('llmMaxTokensPlaceholder') as string}
                 value={tab.form.llm_max_tokens}
                 onInput={(event) => tab.setForm('llm_max_tokens', event.currentTarget.value)}
-              />
-              <TextInput
-                label={t('llmContextWindow') as string}
-                placeholder={t('llmContextWindowPlaceholder') as string}
-                hint={t('llmContextWindowHelp') as string}
-                value={tab.form.llm_context_window}
-                onInput={(event) => tab.setForm('llm_context_window', event.currentTarget.value)}
               />
             </div>
           </div>

@@ -110,6 +110,7 @@ struct claw_core_state {
     claw_core_pending_response_t *pending_tail;
     SemaphoreHandle_t inflight_lock;
     uint32_t inflight_request_id;
+    cJSON *reply_images; /* Owned by the active request under inflight_lock. */
     char inflight_session_id[CLAW_CORE_INFLIGHT_SESSION_ID_SIZE];
     claw_core_agent_loop_phase_t agent_loop_phase;
     volatile bool inflight_abort;
@@ -127,6 +128,7 @@ struct claw_core_state {
 typedef struct claw_core_state claw_core_state_t;
 
 const char *claw_core_log_snippet(const char *text);
+void claw_core_append_reply_images(cJSON *images, char **reply);
 int claw_core_log_snippet_len(const char *text);
 const char *claw_core_log_snippet_suffix(const char *text);
 const char *claw_core_context_kind_to_string(claw_core_context_kind_t kind);

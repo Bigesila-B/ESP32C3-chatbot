@@ -411,7 +411,7 @@ static esp_err_t app_claw_store_current_config(const app_claw_config_t *config)
 
     xSemaphoreTake(s_config_lock, portMAX_DELAY);
 #if CONFIG_APP_CLAW_CAP_MCP_CLIENT
-    esp_err_t err = cap_mcp_client_set_server_url(config->mcp_server_url);
+    esp_err_t err = cap_mcp_client_set_server(config->mcp_server_url, config->mcp_bearer_token);
     if (err != ESP_OK) {
         xSemaphoreGive(s_config_lock);
         return err;
@@ -869,7 +869,13 @@ esp_err_t app_claw_update_config(const app_claw_config_t *config)
     }
     ESP_RETURN_ON_ERROR(app_claw_store_current_config(config), TAG, "Failed to store Claw config");
     app_claw_fill_core_config(config, max_tool_iterations, &core_config);
-    return claw_agent_mgr_update_core_config(&core_config);
+    esp_err_t err = claw_agent_mgr_update_core_config(&core_config);
+#if CONFIG_APP_CLAW_CAP_MEMORY
+    if (err == ESP_OK) {
+        claw_memory_set_context_model(config->llm_model);
+    }
+#endif
+    return err;
 #else
     ESP_RETURN_ON_ERROR(app_claw_store_current_config(config), TAG, "Failed to store Claw config");
     return ESP_OK;

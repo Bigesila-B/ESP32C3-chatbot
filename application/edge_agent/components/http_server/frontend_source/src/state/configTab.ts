@@ -6,18 +6,22 @@ import {
   ensureConfigGroups,
   isGroupLoaded,
   patchConfigLocal,
+  reloadConfigFields,
   reloadConfigGroups,
 } from './config';
 import { markDirty, type TabId } from './dirty';
 import { pushToast } from './toast';
 import { t } from '../i18n';
-import { saveConfigPatch } from '../api/client';
+import { saveConfigPatch, type ConfigPatch } from '../api/client';
 
-export type ConfigTabOptions<T extends object> = {
+type ConfigSource =
+  | { groups: ConfigGroup[]; fields?: never }
+  | { groups?: never; fields: (keyof AppConfig)[] };
+
+export type ConfigTabOptions<T extends object> = ConfigSource & {
   tab: TabId;
-  groups: ConfigGroup[];
   toForm: (config: Partial<AppConfig>) => T;
-  fromForm: (form: T) => Partial<AppConfig>;
+  fromForm: (form: T) => ConfigPatch;
   isDirty?: (form: T, baseline: T) => boolean;
   saveMessage?: () => string;
 };
@@ -40,7 +44,7 @@ export function createConfigTab<T extends object>(options: ConfigTabOptions<T>):
   let baseline: T = clone(initial);
   const [baselineTick, setBaselineTick] = createSignal(0);
   const [saving, setSaving] = createSignal(false);
-  const [loading, setLoading] = createSignal(options.groups.some((group) => !isGroupLoaded(group)));
+  const [loading, setLoading] = createSignal(!options.groups || !isGroupLoadedAll(options.groups));
   const [error, setError] = createSignal<string | null>(null);
 
   const applyBaseline = () => {
@@ -50,24 +54,13 @@ export function createConfigTab<T extends object>(options: ConfigTabOptions<T>):
     setBaselineTick((value) => value + 1);
   };
 
-  const load = async () => {
+  const load = async (refresh = false) => {
     setError(null);
     setLoading(true);
     try {
-      await ensureConfigGroups(options.groups);
-      applyBaseline();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const reload = async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      await reloadConfigGroups(options.groups);
+      if (options.fields) await reloadConfigFields(options.fields);
+      else if (refresh) await reloadConfigGroups(options.groups);
+      else await ensureConfigGroups(options.groups);
       applyBaseline();
     } catch (err) {
       setError((err as Error).message);
@@ -85,7 +78,7 @@ export function createConfigTab<T extends object>(options: ConfigTabOptions<T>):
    * form is not dirty, so we never clobber in-progress edits. */
   createEffect(() => {
     void appConfig();
-    if (!isGroupLoadedAll(options.groups)) return;
+    if (options.groups ? !isGroupLoadedAll(options.groups) : loading() || error()) return;
     if (isDirtyMemo()) return;
     applyBaseline();
   });
@@ -144,7 +137,7 @@ export function createConfigTab<T extends object>(options: ConfigTabOptions<T>):
     error,
     save,
     discard,
-    reload,
+    reload: () => load(true),
   };
 }
 

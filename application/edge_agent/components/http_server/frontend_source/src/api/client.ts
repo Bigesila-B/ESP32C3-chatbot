@@ -38,11 +38,14 @@ export type AppConfig = {
   search_tavily_key: string;
   search_http_allowlist: string;
   mcp_server_url: string;
+  mcp_bearer_token_set: boolean;
   enabled_cap_groups: string;
   llm_visible_cap_groups: string;
   enabled_lua_modules: string;
   time_timezone: string;
 };
+
+export type ConfigPatch = Partial<Omit<AppConfig, 'mcp_bearer_token_set'>> & { mcp_bearer_token?: string };
 
 /** Server-side configuration groups (must stay in sync with
  * CONFIG_FIELDS in http_server_config_api.c). */
@@ -78,7 +81,7 @@ export const GROUP_FIELDS: Record<ConfigGroup, (keyof AppConfig)[]> = {
     'wechat_account_id',
   ],
   search: ['search_brave_key', 'search_tavily_key', 'search_http_allowlist'],
-  mcp: ['mcp_server_url'],
+  mcp: ['mcp_server_url', 'mcp_bearer_token_set'],
   capabilities: ['enabled_cap_groups', 'llm_visible_cap_groups'],
   skills: ['enabled_lua_modules'],
   time: ['time_timezone'],
@@ -199,7 +202,7 @@ export function fetchConfigFields(fields: (keyof AppConfig)[]) {
 
 /** Partial save: only keys present in the patch are written; absent
  * keys remain untouched in NVS. */
-export async function saveConfigPatch(patch: Partial<AppConfig>) {
+export async function saveConfigPatch(patch: ConfigPatch) {
   return request<{
     ok?: boolean;
     applied?: number;
@@ -227,13 +230,34 @@ export async function fetchCapabilities() {
 
 export type McpTestResult = { names: string[]; count: number; has_more: boolean };
 
-export function testMcpServer(serverUrl: string, signal: AbortSignal) {
+export type McpServer = { id: number; name: string; server_url: string; has_token: boolean };
+export type McpServerPatch = Omit<McpServer, 'id' | 'has_token'> & { id?: number; bearer_token?: string };
+export type McpServers = { servers: McpServer[]; version: number; limit: number };
+
+export function fetchMcpServers(signal?: AbortSignal) {
+  return request<McpServers>('/api/mcp/servers', { signal }, 'Failed to load MCP servers');
+}
+
+export function saveMcpServers(servers: McpServerPatch[], version: number) {
+  return request<McpServers>(
+    '/api/mcp/servers',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ servers, version }),
+    },
+    'Failed to save MCP servers',
+  );
+}
+
+export function testMcpServer(serverUrl: string, bearerToken: string | undefined, signal: AbortSignal,
+                              serverId?: number) {
   return request<McpTestResult>(
     '/api/mcp/test',
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ server_url: serverUrl }),
+      body: JSON.stringify({ server_url: serverUrl, bearer_token: bearerToken, server_id: serverId }),
       signal,
     },
     'MCP connection test failed',
@@ -469,7 +493,15 @@ export type SkillCatalogItem = {
 };
 
 export function fetchSkillCatalog() {
-  return request<{ skills: SkillCatalogItem[] }>('/api/skills', undefined, 'Failed to load Skills');
+  return request<{ skills: SkillCatalogItem[]; can_upload?: boolean }>('/api/skills', undefined, 'Failed to load Skills');
+}
+
+export function finishSkillUpload(uploadId: string, skillId: string) {
+  return request<{ ok: boolean }>('/api/skills', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ upload_id: uploadId, skill_id: skillId }),
+  }, 'Failed to install Skill');
 }
 
 export type WebImStatusResponse = {

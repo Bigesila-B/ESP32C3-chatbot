@@ -771,7 +771,8 @@ static esp_err_t cap_im_tg_poll_once(void)
     return ESP_OK;
 }
 
-static esp_err_t cap_im_tg_send_text_chunk(const char *chat_id, const char *message)
+static esp_err_t cap_im_tg_send_json_message(const char *method, const char *chat_id, const char *field,
+                                             const char *content, const char *caption)
 {
     cJSON *body = NULL;
     char *body_json = NULL;
@@ -779,19 +780,20 @@ static esp_err_t cap_im_tg_send_text_chunk(const char *chat_id, const char *mess
     esp_err_t err;
 
     body = cJSON_CreateObject();
-    if (!body) {
+    if (!cJSON_AddStringToObject(body, "chat_id", chat_id) ||
+            !cJSON_AddStringToObject(body, field, content) ||
+            (caption && caption[0] && !cJSON_AddStringToObject(body, "caption", caption))) {
+        cJSON_Delete(body);
         return ESP_ERR_NO_MEM;
     }
 
-    cJSON_AddStringToObject(body, "chat_id", chat_id);
-    cJSON_AddStringToObject(body, "text", message);
     body_json = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
     if (!body_json) {
         return ESP_ERR_NO_MEM;
     }
 
-    err = cap_im_tg_api_call("sendMessage", body_json, &resp);
+    err = cap_im_tg_api_call(method, body_json, &resp);
     free(body_json);
     free(resp);
     return err;
@@ -1090,7 +1092,12 @@ static esp_err_t cap_im_tg_send_media(const char *chat_id,
     const char *method = is_image ? "sendPhoto" : "sendDocument";
     const char *field_name = is_image ? "photo" : "document";
 
-    err = cap_im_tg_send_multipart_file(method, field_name, chat_id, path, caption, is_image);
+    if (!chat_id || !chat_id[0] || !path || !path[0]) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    bool remote = is_image && (strncmp(path, "https://", 8) == 0 || strncmp(path, "http://", 7) == 0);
+    err = remote ? cap_im_tg_send_json_message(method, chat_id, field_name, path, caption) :
+          cap_im_tg_send_multipart_file(method, field_name, chat_id, path, caption, is_image);
     if (err != ESP_OK) {
         ESP_LOGE(TAG,
                  "Telegram %s send failed chat=%s path=%s err=%s",
@@ -1385,7 +1392,7 @@ static const claw_cap_descriptor_t s_tg_descriptors[] = {
         .id = "tg_send_image",
         .name = "tg_send_image",
         .family = "im",
-        .description = "Send an image file from a local path to a Telegram chat.",
+        .description = "Send an image from a local path or public HTTP(S) URL to Telegram.",
         .kind = CLAW_CAP_KIND_CALLABLE,
         .cap_flags = CLAW_CAP_FLAG_CALLABLE_BY_LLM,
         .input_schema_json =
@@ -1518,7 +1525,7 @@ esp_err_t cap_im_tg_send_text(const char *chat_id, const char *text)
         }
 
         memcpy(chunk, text + offset, chunk_len);
-        err = cap_im_tg_send_text_chunk(chat_id, chunk);
+        err = cap_im_tg_send_json_message("sendMessage", chat_id, "text", chunk, NULL);
         free(chunk);
         if (err != ESP_OK) {
             last_err = err;

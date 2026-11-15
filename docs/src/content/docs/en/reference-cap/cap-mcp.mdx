@@ -23,12 +23,27 @@ ESP-Claw implements [Model Context Protocol (MCP)](https://modelcontextprotocol.
 
 ## cap_mcp_client
 
+### Connect a server
+
+In Enhancements → MCP Settings, add up to four named servers. Each card can be collapsed, tested, and assigned its own Bearer token. Use **Make default** to choose the server used by default, then save. Existing single-server settings appear as the first card. Prefer HTTPS over public networks.
+
+Mark MCP Client as LLM-visible in Capabilities and restart the device if you change the permission. Use a saved name in chat to select that server. The device lists saved names with `mcp_list_servers` and checks a connection with `mcp_list_tools`. Find the `cap_mcp_client` guide under Enhancements → Skills.
+
+- Streamable HTTP supports JSON and SSE responses and both stateless and stateful sessions. Legacy HTTP+SSE servers also work.
+- The client lists and calls remote tools over MCP versions 2025-03-26, 2025-06-18, 2025-11-25 and legacy HTTP+SSE 2024-11-05. Desktop `stdio` servers need an HTTP bridge.
+- Use `image_delivery` with any tool to send a direct image result or follow the server's job status tool. ESP-Claw can follow two image jobs in the background for about five minutes and send the results to their original chats.
+- Web, QQ, and Telegram can display supported hosted images directly. Other channels receive the download link. Use `/mcp last-image` to resend from the same chat and refresh a job's temporary link. The four most recently recorded chats are kept in RAM until restart.
+- Web chat also supports inline PNG, JPEG, GIF, and WebP up to 64 KiB each. The latest four are kept in PSRAM until replaced or the device restarts. Each MCP JSON response or SSE event is capped at 96 KiB.
+- `/mcp models` queries the default server's advertised `list_models` catalogue. It supports simple lists and paged catalogues with `kind`, `limit`, and `offset`. Use other catalogue tools according to the server's schema.
+
 ### Tool description
 
 | Tool ID | Description |
 |---------|-------------|
+| `mcp_list_servers` | List saved server names and show the default |
 | `mcp_list_tools` | List available tools on a remote MCP server |
 | `mcp_call_tool` | Call a specified tool on a remote MCP server |
+| `mcp_last_image` | Fetch and resend the latest generated image from this chat |
 | `mcp_discover` | Discover MCP servers advertised on the local network |
 
 ### Tool parameters
@@ -37,18 +52,43 @@ ESP-Claw implements [Model Context Protocol (MCP)](https://modelcontextprotocol.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `server_url` | string | Yes | MCP server URL |
+| `server` | string | | Saved server name. Defaults to the first server |
+| `server_url` | string | | Explicit MCP URL in place of a server name |
 | `endpoint` | string | | MCP endpoint path |
 | `cursor` | string | | Pagination cursor |
+| `tool_name` | string | | Show the input and output schemas declared by one tool |
 
 #### `mcp_call_tool`
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `server_url` | string | Yes | MCP server URL |
+| `server` | string | | Saved server name. Defaults to the first server |
+| `server_url` | string | | Explicit MCP URL in place of a server name |
 | `tool_name` | string | Yes | Tool name to call |
 | `endpoint` | string | | MCP endpoint path |
 | `arguments` | object | | Arguments passed to the tool |
+| `image_delivery` | object | | Send tool-generated images to the original chat, with optional job polling |
+
+Use `image_delivery: {}` to send a direct image result. For asynchronous generation, set `status_tool` to the server's read-only status tool and use `id_field` and `id_argument` for the returned ID path and the status tool's parameter. Both default to `job_id`. The status tool takes the job ID as its sole required parameter.
+
+This example uses a service with a `render` tool, a `task_status` lookup, and an array of image links. Use the tools and fields exposed by your server.
+
+```json
+{
+  "server": "Example image server",
+  "tool_name": "render",
+  "arguments": {"prompt": "A cat asleep by a window"},
+  "image_delivery": {
+    "status_tool": "task_status",
+    "id_field": "task.id",
+    "id_argument": "task_id",
+    "status_field": "state",
+    "image_field": "result.urls"
+  }
+}
+```
+
+`status_field` defaults to `status` and recognizes completion values such as `completed`, `succeeded`, and `ready`. Use `image_field` to select an image URL or array of URLs. The client also recognizes the `generate_image` and `get_job(job_id)` convention. Set `request_id_argument` to fill a missing required string idempotency argument. The convention uses `request_id`.
 
 #### `mcp_discover`
 
@@ -62,8 +102,8 @@ ESP-Claw implements [Model Context Protocol (MCP)](https://modelcontextprotocol.
 | Property | Value |
 |----------|-------|
 | Group ID | `cap_mcp_client` |
-| Default LLM-visible | No (requires Skill activation) |
-| Tool count | 3 |
+| Default LLM-visible | No (enable it for the LLM in Capabilities, then restart) |
+| Tool count | 5 |
 
 ## cap_mcp_server
 

@@ -175,7 +175,7 @@ static esp_err_t files_upload_handler(httpd_req_t *req)
     if (http_server_query_get(req, "path", relative_path, sizeof(relative_path)) != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing path");
     }
-    if (req->content_len <= 0 || req->content_len > HTTP_SERVER_UPLOAD_MAX_SIZE) {
+    if (req->content_len > HTTP_SERVER_UPLOAD_MAX_SIZE) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid upload size");
     }
 
@@ -202,8 +202,8 @@ static esp_err_t files_upload_handler(httpd_req_t *req)
         return files_upload_write_error(req, errno);
     }
 
-    char *scratch = http_server_alloc_scratch_buffer();
-    if (!scratch) {
+    char *scratch = req->content_len ? http_server_alloc_scratch_buffer() : NULL;
+    if (req->content_len && !scratch) {
         fclose(file);
         unlink(full_path);
         httpd_resp_send_500(req);

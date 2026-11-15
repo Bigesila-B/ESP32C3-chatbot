@@ -79,7 +79,8 @@ static esp_err_t push_unique_string(char ***items, size_t *count, const char *va
 static esp_err_t load_registry_dir_recursive(const char *root_dir,
                                              const char *relative_dir,
                                              claw_skill_registry_entry_t **entries,
-                                             size_t *entry_count);
+                                             size_t *entry_count,
+                                             bool strict);
 static esp_err_t parse_skill_document_metadata(const char *filename, const char *text, int default_order, claw_skill_registry_entry_t *entry);
 
 static void safe_copy(char *dst, size_t dst_size, const char *src)
@@ -982,7 +983,8 @@ static esp_err_t validate_registry_entry(claw_skill_registry_entry_t *entry)
 static esp_err_t load_registry_dir_recursive(const char *root_dir,
                                              const char *relative_dir,
                                              claw_skill_registry_entry_t **entries,
-                                             size_t *entry_count)
+                                             size_t *entry_count,
+                                             bool strict)
 {
     DIR *dir = NULL;
     struct dirent *item = NULL;
@@ -1057,7 +1059,7 @@ static esp_err_t load_registry_dir_recursive(const char *root_dir,
                 /* Don't descend into the current skill's content subtree. */
                 continue;
             }
-            err = load_registry_dir_recursive(root_dir, relative_path, entries, entry_count);
+            err = load_registry_dir_recursive(root_dir, relative_path, entries, entry_count, strict);
             if (err != ESP_OK) {
                 goto cleanup;
             }
@@ -1082,6 +1084,11 @@ static esp_err_t load_registry_dir_recursive(const char *root_dir,
         err = read_file_dup(path, s_skill->max_file_bytes, &text);
         free(path);
         if (err != ESP_OK) {
+            if (!strict && err == ESP_ERR_INVALID_SIZE) {
+                ESP_LOGW(TAG, "Skipping oversized installed skill document %s", relative_path);
+                err = ESP_OK;
+                continue;
+            }
             ESP_LOGE(TAG, "read skill file %s failed: %s", relative_path, esp_err_to_name(err));
             goto cleanup;
         }
@@ -1099,21 +1106,17 @@ static esp_err_t load_registry_dir_recursive(const char *root_dir,
 
         err = parse_skill_document_metadata(relative_path, text, (int)*entry_count, entry);
         free(text);
-        if (err == ESP_ERR_INVALID_ARG) {
-            ESP_LOGE(TAG, "skill file %s has invalid metadata", relative_path);
-            free_registry_entry(entry);
-            goto cleanup;
+        if (err == ESP_OK) {
+            err = validate_registry_entry(entry);
         }
         if (err != ESP_OK) {
-            ESP_LOGE(TAG, "skill file %s metadata parse failed: %s", relative_path, esp_err_to_name(err));
             free_registry_entry(entry);
-            goto cleanup;
-        }
-
-        err = validate_registry_entry(entry);
-        if (err != ESP_OK) {
+            if (!strict && (err == ESP_ERR_INVALID_ARG || err == ESP_ERR_INVALID_SIZE || err == ESP_ERR_NOT_FOUND)) {
+                ESP_LOGW(TAG, "Skipping invalid installed skill document %s: %s", relative_path, esp_err_to_name(err));
+                err = ESP_OK;
+                continue;
+            }
             ESP_LOGE(TAG, "skill file %s validation failed: %s", relative_path, esp_err_to_name(err));
-            free_registry_entry(entry);
             goto cleanup;
         }
 
@@ -1143,7 +1146,7 @@ cleanup:
     return err;
 }
 
-static esp_err_t load_registry_from_markdown(void)
+static esp_err_t collect_registry_from_markdown(claw_skill_registry_entry_t **out_entries, size_t *out_count)
 {
     claw_skill_registry_entry_t *entries = NULL;
     size_t entry_count = 0;
@@ -1162,7 +1165,8 @@ static esp_err_t load_registry_from_markdown(void)
             continue;
         }
 
-        err = load_registry_dir_recursive(s_skill->roots[r], NULL, &entries, &entry_count);
+        /* Keep the catalog available when a manually installed document is malformed. */
+        err = load_registry_dir_recursive(s_skill->roots[r], NULL, &entries, &entry_count, false);
         if (err != ESP_OK) {
             free_registry_entries(entries, entry_count);
             return err;
@@ -1175,9 +1179,40 @@ static esp_err_t load_registry_from_markdown(void)
         ESP_LOGW(TAG, "no skill markdown found in any skills root (registry empty)");
     }
 
-    s_skill->entries = entries;
-    s_skill->entry_count = entry_count;
+    *out_entries = entries;
+    *out_count = entry_count;
     return ESP_OK;
+}
+
+esp_err_t claw_skill_validate_install(const char *staging_root, const char *skill_id)
+{
+    if (!s_skill || !s_skill->initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!staging_root || !skill_path_is_valid(skill_id) || strchr(skill_id, '/')) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    claw_skill_registry_entry_t *entries = NULL;
+    size_t count = 0;
+    esp_err_t err = collect_registry_from_markdown(&entries, &count);
+    if (err != ESP_OK) {
+        return err;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        if (strcasecmp(entries[i].id, skill_id) == 0) {
+            err = ESP_ERR_INVALID_STATE;
+            goto done;
+        }
+    }
+    size_t installed_count = count;
+    err = load_registry_dir_recursive(staging_root, skill_id, &entries, &count, true);
+    if (err == ESP_OK && (count != installed_count + 1 || strcmp(entries[installed_count].id, skill_id) != 0)) {
+        err = ESP_ERR_INVALID_ARG;
+    }
+done:
+    free_registry_entries(entries, count);
+    return err;
 }
 
 /* Replace all occurrences of var with replacement in buf (in-place). */
@@ -1597,7 +1632,7 @@ esp_err_t claw_skill_reload_registry(void)
     s_skill->entries = NULL;
     s_skill->entry_count = 0;
 
-    err = load_registry_from_markdown();
+    err = collect_registry_from_markdown(&s_skill->entries, &s_skill->entry_count);
     if (err == ESP_OK) {
         free_registry_entries(old_entries, old_count);
         ESP_LOGI(TAG, "Reloaded registry with %u skill(s)", (unsigned)s_skill->entry_count);

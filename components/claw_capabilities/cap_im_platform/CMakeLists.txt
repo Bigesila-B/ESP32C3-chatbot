@@ -49,4 +49,6 @@ idf_component_register(
         freertos
         mbedtls
         console
+    PRIV_REQUIRES
+        http_parser
 )

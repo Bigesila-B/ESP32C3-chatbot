@@ -60,6 +60,10 @@ esp_err_t claw_session_mgr_build_session_id(const claw_session_build_context_t *
                                             char *buf,
                                             size_t buf_size,
                                             size_t *out_len);
+/* Resolve the current session using the normal naming rules without creating a chat mapping. */
+esp_err_t claw_session_mgr_peek_session_id(const claw_session_build_context_t *ctx,
+                                           char *buf,
+                                           size_t buf_size);
 esp_err_t claw_session_mgr_alloc_subagent_session_id(const char *parent_session_id,
                                                      char *buf,
                                                      size_t buf_size,

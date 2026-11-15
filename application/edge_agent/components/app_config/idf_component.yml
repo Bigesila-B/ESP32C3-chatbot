@@ -1,0 +1,5 @@
+dependencies:
+  cap_mcp_client:
+    rules:
+      - if: $CONFIG{APP_CLAW_CAP_MCP_CLIENT} == True
+    path: ../../../../components/claw_capabilities/cap_mcp_client

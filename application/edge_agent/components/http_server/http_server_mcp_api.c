@@ -6,6 +6,7 @@
 #include "http_server_priv.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "cap_mcp_client.h"
 #include "claw_cap.h"
@@ -18,6 +19,7 @@
 typedef struct {
     httpd_req_t *req;
     cJSON *input;
+    uint32_t server_id;
 } mcp_test_request_t;
 
 static portMUX_TYPE s_test_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -66,11 +68,14 @@ static void mcp_test_task(void *arg)
 {
     mcp_test_request_t *test = arg;
     cJSON *result = NULL;
-    esp_err_t err = cap_mcp_client_list_tools(test->input, &result);
+    const char *url = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(test->input, "server_url"));
+    const char *token = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(test->input, "bearer_token"));
+    esp_err_t err = cap_mcp_client_test_server_entry(url, token, test->server_id, &result);
     if (err == ESP_OK) {
         mcp_test_send_result(test->req, result);
     } else {
         httpd_resp_set_status(test->req, "502 Bad Gateway");
+        /* The Web UI localizes these codes, including remote HTTP 401 and 403. */
         httpd_resp_sendstr(test->req, esp_err_to_name(err));
     }
 
@@ -99,9 +104,17 @@ static esp_err_t mcp_test_post_handler(httpd_req_t *req)
         cJSON_Delete(input);
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid MCP server URL");
     }
-    /* The Web test accepts one complete URL, just like the saved setting. */
-    cJSON_DeleteItemFromObjectCaseSensitive(input, "endpoint");
-    cJSON_DeleteItemFromObjectCaseSensitive(input, "cursor");
+    const cJSON *token = cJSON_GetObjectItemCaseSensitive(input, "bearer_token");
+    if (token && cap_mcp_client_validate_bearer_token(cJSON_GetStringValue(token)) != ESP_OK) {
+        cJSON_Delete(input);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid MCP Bearer token");
+    }
+    const cJSON *id_item = cJSON_GetObjectItemCaseSensitive(input, "server_id");
+    double id = id_item ? cJSON_GetNumberValue(id_item) : 0;
+    if (!(id >= 0 && id <= UINT32_MAX) || (uint32_t)id != id) {
+        cJSON_Delete(input);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid MCP server ID");
+    }
 
     portENTER_CRITICAL(&s_test_lock);
     bool busy = s_test_running;
@@ -121,6 +134,7 @@ static esp_err_t mcp_test_post_handler(httpd_req_t *req)
         return httpd_resp_send_500(req);
     }
     test->input = input;
+    test->server_id = (uint32_t)id;
     if (xTaskCreate(mcp_test_task, "mcp_test", MCP_TEST_STACK_SIZE, test,
                     tskIDLE_PRIORITY + 1, NULL) != pdPASS) {
         httpd_resp_send_500(test->req);
@@ -132,12 +146,67 @@ static esp_err_t mcp_test_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t mcp_servers_get_handler(httpd_req_t *req)
+{
+    cJSON *servers = app_config_mcp_servers();
+    return servers ? http_server_send_json_response(req, servers) : httpd_resp_send_500(req);
+}
+
+static esp_err_t mcp_servers_post_handler(httpd_req_t *req)
+{
+    cJSON *input = NULL;
+    if (http_server_parse_json_body(req, &input) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON body");
+    }
+    esp_err_t err = app_config_mcp_replace(input);
+    cJSON_Delete(input);
+    if (err == ESP_ERR_INVALID_STATE) {
+        httpd_resp_set_status(req, "409 Conflict");
+        return httpd_resp_sendstr(req, esp_err_to_name(err));
+    }
+    if (err != ESP_OK) {
+        httpd_err_code_t status = err == ESP_ERR_INVALID_ARG || err == ESP_ERR_INVALID_SIZE ?
+                                  HTTPD_400_BAD_REQUEST : HTTPD_500_INTERNAL_SERVER_ERROR;
+        return httpd_resp_send_err(req, status, esp_err_to_name(err));
+    }
+    return mcp_servers_get_handler(req);
+}
+
+static esp_err_t mcp_image_get_handler(httpd_req_t *req)
+{
+    char id[9];
+    if (http_server_query_get(req, "id", id, sizeof(id)) != ESP_OK ||
+            strlen(id) != sizeof(id) - 1 || strspn(id, "0123456789abcdefABCDEF") != sizeof(id) - 1) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid MCP image ID");
+    }
+    cap_mcp_image_t *image = cap_mcp_client_image_acquire((uint32_t)strtoul(id, NULL, 16));
+    if (!image) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "MCP image expired");
+    }
+    size_t size;
+    const char *mime;
+    const char *data = cap_mcp_client_image_data(image, &size, &mime);
+    httpd_resp_set_type(req, mime);
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
+    esp_err_t err = httpd_resp_send(req, data, size);
+    cap_mcp_client_image_release(image);
+    return err;
+}
+
 esp_err_t http_server_register_mcp_routes(httpd_handle_t server)
 {
-    const httpd_uri_t route = {
-        .uri = "/api/mcp/test",
-        .method = HTTP_POST,
-        .handler = mcp_test_post_handler,
+    const httpd_uri_t routes[] = {
+        { .uri = "/api/mcp/test", .method = HTTP_POST, .handler = mcp_test_post_handler },
+        { .uri = "/api/mcp/servers", .method = HTTP_GET, .handler = mcp_servers_get_handler },
+        { .uri = "/api/mcp/servers", .method = HTTP_POST, .handler = mcp_servers_post_handler },
+        { .uri = "/api/mcp/image", .method = HTTP_GET, .handler = mcp_image_get_handler },
     };
-    return httpd_register_uri_handler(server, &route);
+    for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {
+        esp_err_t err = httpd_register_uri_handler(server, &routes[i]);
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+    return ESP_OK;
 }

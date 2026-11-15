@@ -53,7 +53,6 @@
 #define CLAW_MEMORY_SUMMARY_MAX_CHARS       2048U   /* 摘要正文最大字符数 */
 #define CLAW_MEMORY_SUMMARY_INPUT_MAX_CHARS 6000U   /* 送入摘要的原始文本上限 */
 #define CLAW_MEMORY_AVG_BYTES_PER_TOKEN     3U      /* UTF-8 中文为主的粗估系数 */
-#define CLAW_MEMORY_LLM_MODEL_MAX           64      /* 模型名字段长度 */
 
 typedef enum {
     CLAW_MEMORY_BACKEND_FORMAT_UNKNOWN = 0,
@@ -75,9 +74,7 @@ typedef struct {
     size_t max_message_chars;
     uint32_t max_tool_iterations;
     claw_memory_backend_format_t backend_format;
-    /* 当前配置的模型名，用于自动匹配上下文窗口大小 */
-    char llm_model[CLAW_MEMORY_LLM_MODEL_MAX];
-    /* 用户显式指定的上下文窗口（token）。0 表示按 llm_model 自动匹配 */
+    /* 用户显式指定的上下文窗口（token）。0 表示按模型名自动匹配 */
     uint32_t context_window_tokens;
     uint32_t write_changes_since_compact;
     uint32_t next_memory_seq;

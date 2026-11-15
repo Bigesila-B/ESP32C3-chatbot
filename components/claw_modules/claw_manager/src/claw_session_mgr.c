@@ -25,6 +25,7 @@ static const char *TAG = "claw_session_mgr";
 #define CLAW_SESSION_MGR_ROOT_SIZE    160
 #define CLAW_SESSION_MGR_MAP_ROOT_SIZE 192
 #define CLAW_SESSION_MGR_DEFAULT_BASE "default_"
+#define CLAW_SESSION_MGR_DEFAULT_ALIAS CLAW_SESSION_MGR_DEFAULT_BASE "01"
 #define CLAW_SESSION_MGR_SUBAGENT_MAX 16
 
 typedef struct {
@@ -407,9 +408,9 @@ static esp_err_t claw_session_mgr_init_mapping_locked(const char *chat_key,
 
     memset(out_map, 0, sizeof(*out_map));
     strlcpy(out_map->chat_key, chat_key, sizeof(out_map->chat_key));
-    strlcpy(out_map->current_alias, "default_01", sizeof(out_map->current_alias));
+    strlcpy(out_map->current_alias, CLAW_SESSION_MGR_DEFAULT_ALIAS, sizeof(out_map->current_alias));
     out_map->session_count = 1;
-    strlcpy(out_map->sessions[0], "default_01", sizeof(out_map->sessions[0]));
+    strlcpy(out_map->sessions[0], CLAW_SESSION_MGR_DEFAULT_ALIAS, sizeof(out_map->sessions[0]));
 
     return claw_session_mgr_write_mapping_locked(out_map);
 }
@@ -479,7 +480,8 @@ static esp_err_t claw_session_mgr_build_current_session_id_locked(uint32_t agent
                                                                   const char *chat_id,
                                                                   char *buf,
                                                                   size_t buf_size,
-                                                                  size_t *out_len)
+                                                                  size_t *out_len,
+                                                                  bool create_mapping)
 {
     char chat_key[CLAW_SESSION_MGR_KEY_SIZE];
     claw_session_mgr_alias_map_t map;
@@ -490,7 +492,12 @@ static esp_err_t claw_session_mgr_build_current_session_id_locked(uint32_t agent
         return err;
     }
 
-    err = claw_session_mgr_load_or_init_mapping_locked(chat_key, &map);
+    err = create_mapping ? claw_session_mgr_load_or_init_mapping_locked(chat_key, &map)
+                         : claw_session_mgr_load_mapping_locked(chat_key, &map);
+    if (!create_mapping && err == ESP_ERR_NOT_FOUND) {
+        return claw_session_mgr_build_alias_session_id(chat_key, CLAW_SESSION_MGR_DEFAULT_ALIAS,
+                                                       buf, buf_size, out_len);
+    }
     if (err != ESP_OK) {
         return err;
     }
@@ -1075,10 +1082,11 @@ esp_err_t claw_session_mgr_delete_subagent_session(const char *parent_session_id
     return err;
 }
 
-esp_err_t claw_session_mgr_build_session_id(const claw_session_build_context_t *ctx,
-                                            char *buf,
-                                            size_t buf_size,
-                                            size_t *out_len)
+static esp_err_t claw_session_mgr_resolve_session_id(const claw_session_build_context_t *ctx,
+                                                       char *buf,
+                                                       size_t buf_size,
+                                                       size_t *out_len,
+                                                       bool create_mapping)
 {
     esp_err_t err;
 
@@ -1104,7 +1112,7 @@ esp_err_t claw_session_mgr_build_session_id(const claw_session_build_context_t *
                                                            ctx->chat_id,
                                                            buf,
                                                            buf_size,
-                                                           out_len);
+                                                           out_len, create_mapping);
     xSemaphoreGiveRecursive(s_session_mgr.mutex);
     if (err != ESP_OK) {
         ESP_LOGW(TAG,
@@ -1117,6 +1125,22 @@ esp_err_t claw_session_mgr_build_session_id(const claw_session_build_context_t *
     }
 
     return ESP_OK;
+}
+
+esp_err_t claw_session_mgr_build_session_id(const claw_session_build_context_t *ctx,
+                                            char *buf,
+                                            size_t buf_size,
+                                            size_t *out_len)
+{
+    return claw_session_mgr_resolve_session_id(ctx, buf, buf_size, out_len, true);
+}
+
+esp_err_t claw_session_mgr_peek_session_id(const claw_session_build_context_t *ctx,
+                                           char *buf,
+                                           size_t buf_size)
+{
+    size_t len;
+    return claw_session_mgr_resolve_session_id(ctx, buf, buf_size, &len, false);
 }
 
 esp_err_t claw_session_mgr_new_chat_session(uint32_t agent_id,

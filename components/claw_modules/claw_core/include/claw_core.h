@@ -45,6 +45,9 @@ typedef enum {
 
 typedef struct claw_core_state *claw_core_handle_t;
 
+/** Attach an image to the active request's final reply from a tool callback. */
+esp_err_t claw_core_add_reply_image(claw_core_handle_t core, uint32_t request_id, const char *url);
+
 typedef struct {
     uint32_t request_id;
     uint32_t flags;
