@@ -18,6 +18,7 @@
 #include <sys/types.h>
 
 #include "cap_im_attachment.h"
+#include "claw_image_cache.h"
 #include "claw_cap.h"
 #include "claw_task.h"
 #include "claw_event_publisher.h"
@@ -1056,78 +1057,6 @@ static cap_im_feishu_attachment_job_t *cap_im_feishu_make_attachment_job(const c
     return job;
 }
 
-static esp_err_t cap_im_feishu_ensure_dir(const char *path)
-{
-    struct stat st = {0};
-
-    if (!path || !path[0]) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    if (stat(path, &st) == 0) {
-        return S_ISDIR(st.st_mode) ? ESP_OK : ESP_FAIL;
-    }
-
-    if (mkdir(path, 0755) != 0 && errno != EEXIST) {
-        return ESP_FAIL;
-    }
-
-    return ESP_OK;
-}
-
-static esp_err_t cap_im_feishu_ensure_parent_dirs(const char *path)
-{
-    char dir[CAP_IM_FEISHU_PATH_LEN];
-    char *cursor = NULL;
-    char *slash = NULL;
-    char *create_from = NULL;
-    struct stat st = {0};
-
-    if (!path || !path[0]) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    strlcpy(dir, path, sizeof(dir));
-    slash = strrchr(dir, '/');
-    if (!slash) {
-        return ESP_OK;
-    }
-    *slash = '\0';
-
-    if (dir[0] != '/') {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    for (cursor = dir + 1; *cursor; cursor++) {
-        if (*cursor != '/') {
-            continue;
-        }
-
-        *cursor = '\0';
-        if (stat(dir, &st) == 0 && S_ISDIR(st.st_mode)) {
-            create_from = cursor + 1;
-        }
-        *cursor = '/';
-    }
-
-    if (!create_from) {
-        return ESP_FAIL;
-    }
-
-    for (cursor = create_from; *cursor; cursor++) {
-        if (*cursor == '/') {
-            *cursor = '\0';
-            if (cap_im_feishu_ensure_dir(dir) != ESP_OK) {
-                *cursor = '/';
-                return ESP_FAIL;
-            }
-            *cursor = '/';
-        }
-    }
-
-    return cap_im_feishu_ensure_dir(dir);
-}
-
 static esp_err_t cap_im_feishu_save_attachment_metadata(const char *chat_id,
                                                         const char *sender_id,
                                                         const char *message_id,
@@ -1364,10 +1293,10 @@ static esp_err_t cap_im_feishu_download_attachment(const char *message_id,
     };
     char auth_header[CAP_IM_FEISHU_TOKEN_LEN + 16];
     char url[CAP_IM_FEISHU_URL_LEN];
-    FILE *file = NULL;
+    claw_image_cache_writer_t writer = {0};
     char read_buf[2048];
-    size_t total_bytes = 0;
-    int content_length = 0;
+    int64_t content_length = 0;
+    size_t limit = s_feishu.max_inbound_file_bytes ? s_feishu.max_inbound_file_bytes : (2 * 1024 * 1024);
     int status = 0;
     esp_err_t err;
 
@@ -1449,17 +1378,7 @@ static esp_err_t cap_im_feishu_download_attachment(const char *message_id,
         esp_http_client_cleanup(client);
         return ESP_FAIL;
     }
-    if (content_length > 0 &&
-            (size_t)content_length > (s_feishu.max_inbound_file_bytes ? s_feishu.max_inbound_file_bytes :
-                                      (2 * 1024 * 1024))) {
-        ESP_LOGW(TAG,
-                 "Feishu attachment too large before read message=%s kind=%s content_length=%d limit=%u",
-                 message_id,
-                 resource_type,
-                 content_length,
-                 (unsigned)(s_feishu.max_inbound_file_bytes ? s_feishu.max_inbound_file_bytes :
-                            (2 * 1024 * 1024)));
-        esp_http_client_close(client);
+    if (content_length > (int64_t)limit) {
         esp_http_client_cleanup(client);
         return ESP_ERR_INVALID_SIZE;
     }
@@ -1480,84 +1399,30 @@ static esp_err_t cap_im_feishu_download_attachment(const char *message_id,
         return err;
     }
 
-    err = cap_im_feishu_ensure_parent_dirs(path->saved_path);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG,
-                 "Feishu attachment ensure dir failed message=%s path=%s err=%s",
-                 message_id,
-                 path->saved_path,
-                 esp_err_to_name(err));
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        return err;
-    }
-
-    file = fopen(path->saved_path, "wb");
-    if (!file) {
-        ESP_LOGW(TAG, "Feishu attachment open file failed path=%s errno=%d", path->saved_path, errno);
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        return ESP_FAIL;
-    }
-
-    while (1) {
+    err = claw_image_cache_begin(&writer, path->saved_path, content_length > 0 ? (size_t)content_length : 0, limit);
+    while (err == ESP_OK) {
         int read_len = esp_http_client_read(client, read_buf, sizeof(read_buf));
-
-        if (read_len < 0) {
-            ESP_LOGW(TAG,
-                     "Feishu attachment read failed message=%s kind=%s after=%u",
-                     message_id,
-                     resource_type,
-                     (unsigned)total_bytes);
-            err = ESP_FAIL;
+        if (read_len <= 0) {
+            if (read_len < 0 || !writer.bytes || !esp_http_client_is_complete_data_received(client)) {
+                err = ESP_FAIL;
+            }
             break;
         }
-        if (read_len == 0) {
-            err = ESP_OK;
-            break;
-        }
-        total_bytes += (size_t)read_len;
-        if (total_bytes > (s_feishu.max_inbound_file_bytes ? s_feishu.max_inbound_file_bytes :
-                           (2 * 1024 * 1024))) {
-            ESP_LOGW(TAG,
-                     "Feishu attachment exceeded limit while reading message=%s kind=%s bytes=%u limit=%u",
-                     message_id,
-                     resource_type,
-                     (unsigned)total_bytes,
-                     (unsigned)(s_feishu.max_inbound_file_bytes ? s_feishu.max_inbound_file_bytes :
-                                (2 * 1024 * 1024)));
-            err = ESP_ERR_INVALID_SIZE;
-            break;
-        }
-        if (fwrite(read_buf, 1, (size_t)read_len, file) != (size_t)read_len) {
-            ESP_LOGW(TAG,
-                     "Feishu attachment fwrite failed path=%s errno=%d bytes=%u",
-                     path->saved_path,
-                     errno,
-                     (unsigned)total_bytes);
-            err = ESP_FAIL;
-            break;
-        }
+        err = claw_image_cache_write(&writer, read_buf, (size_t)read_len);
     }
 
-    fclose(file);
+    if (writer.file) {
+        esp_err_t finish = claw_image_cache_finish(&writer, err == ESP_OK);
+        if (err == ESP_OK) {
+            err = finish;
+        }
+    }
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
-    if (err != ESP_OK || total_bytes == 0) {
-        ESP_LOGW(TAG,
-                 "Feishu attachment download failed final message=%s kind=%s err=%s bytes=%u",
-                 message_id,
-                 resource_type,
-                 esp_err_to_name(err != ESP_OK ? err : ESP_FAIL),
-                 (unsigned)total_bytes);
-        remove(path->saved_path);
-        return err != ESP_OK ? err : ESP_FAIL;
+    if (err == ESP_OK && out_bytes) {
+        *out_bytes = writer.bytes;
     }
-
-    if (out_bytes) {
-        *out_bytes = total_bytes;
-    }
-    return ESP_OK;
+    return err;
 }
 
 static esp_err_t cap_im_feishu_save_attachment(const char *chat_id,

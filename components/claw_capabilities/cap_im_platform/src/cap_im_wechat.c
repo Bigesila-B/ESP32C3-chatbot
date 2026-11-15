@@ -16,6 +16,7 @@
 #include <sys/types.h>
 
 #include "cap_im_attachment.h"
+#include "claw_image_cache.h"
 #include "cJSON.h"
 #include "claw_cap.h"
 #include "claw_task.h"
@@ -70,6 +71,8 @@ typedef struct {
     size_t len;
     size_t cap;
     char *encrypted_param;
+    size_t max_bytes;
+    esp_err_t error;
 } cap_im_wechat_http_resp_t;
 
 typedef struct {
@@ -465,13 +468,17 @@ static esp_err_t cap_im_wechat_http_event_handler(esp_http_client_event_t *event
         return ESP_OK;
     }
 
+    if (resp->error != ESP_OK) {
+        return resp->error;
+    }
+
     if (event->event_id == HTTP_EVENT_ON_HEADER && event->header_key &&
             event->header_value &&
             strcasecmp(event->header_key, "x-encrypted-param") == 0) {
         char *copy = strdup(event->header_value);
 
         if (!copy) {
-            return ESP_ERR_NO_MEM;
+            return resp->error = ESP_ERR_NO_MEM;
         }
         free(resp->encrypted_param);
         resp->encrypted_param = copy;
@@ -482,6 +489,16 @@ static esp_err_t cap_im_wechat_http_event_handler(esp_http_client_event_t *event
         return ESP_OK;
     }
 
+    if (resp->max_bytes) {
+        int status = esp_http_client_get_status_code(event->client);
+        if (status < 200 || status >= 300) {
+            return ESP_OK;
+        }
+        if ((size_t)event->data_len > resp->max_bytes - resp->len) {
+            return resp->error = ESP_ERR_INVALID_SIZE;
+        }
+    }
+
     needed = resp->len + (size_t)event->data_len + 1;
     if (needed > resp->cap) {
         size_t new_cap = resp->cap ? resp->cap : CAP_IM_WECHAT_HTTP_RESP_INIT;
@@ -490,9 +507,12 @@ static esp_err_t cap_im_wechat_http_event_handler(esp_http_client_event_t *event
             new_cap *= 2;
         }
 
+        if (resp->max_bytes && new_cap > resp->max_bytes + 1) {
+            new_cap = resp->max_bytes + 1;
+        }
         next = realloc(resp->buf, new_cap);
         if (!next) {
-            return ESP_ERR_NO_MEM;
+            return resp->error = ESP_ERR_NO_MEM;
         }
 
         resp->buf = next;
@@ -520,6 +540,7 @@ static esp_err_t cap_im_wechat_resp_prepare(cap_im_wechat_http_resp_t *response)
     }
 
     response->len = 0;
+    response->error = ESP_OK;
     response->buf[0] = '\0';
     free(response->encrypted_param);
     response->encrypted_param = NULL;
@@ -640,7 +661,14 @@ static esp_err_t cap_im_wechat_http_request(const char *url,
     }
 
     err = esp_http_client_perform(client);
+    if (response && response->error != ESP_OK) {
+        err = response->error;
+    }
     if (err != ESP_OK) {
+        goto cleanup;
+    }
+    if (response && response->max_bytes && !esp_http_client_is_complete_data_received(client)) {
+        err = ESP_FAIL;
         goto cleanup;
     }
 
@@ -791,7 +819,7 @@ static esp_err_t cap_im_wechat_download_buffer(const char *url,
                                                unsigned char **out_buf,
                                                size_t *out_len)
 {
-    cap_im_wechat_http_resp_t response = {0};
+    cap_im_wechat_http_resp_t response = {.max_bytes = max_bytes};
     esp_err_t err;
 
     if (!url || !out_buf || !out_len) {
@@ -1403,10 +1431,14 @@ static esp_err_t cap_im_wechat_process_media_item(cJSON *item,
         return ESP_FAIL;
     }
 
+    size_t limit = s_wechat.max_inbound_file_bytes;
+    if (strcmp(kind, "image") == 0 && limit > CLAW_IMAGE_CACHE_LIMIT) {
+        limit = CLAW_IMAGE_CACHE_LIMIT;
+    }
     err = cap_im_wechat_download_media_plaintext(full_url,
                                                  download_param,
                                                  aes_key,
-                                                 s_wechat.max_inbound_file_bytes,
+                                                 limit,
                                                  &buf,
                                                  &buf_len);
     if (err != ESP_OK) {

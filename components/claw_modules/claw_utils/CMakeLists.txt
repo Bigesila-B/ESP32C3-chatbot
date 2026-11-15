@@ -1,7 +1,11 @@
 idf_component_register(
     SRCS
+        "src/claw_image_cache.c"
         "src/claw_utils_string.c"
         "src/claw_utils_time.c"
     INCLUDE_DIRS
         "include"
+    PRIV_REQUIRES
+        fatfs
+        freertos
 )

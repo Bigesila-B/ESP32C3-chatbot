@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "http_server_priv.h"
+#include "claw_image_cache.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -184,51 +185,65 @@ static esp_err_t files_upload_handler(httpd_req_t *req)
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid path");
     }
 
-    char parent_path[HTTP_SERVER_PATH_MAX];
-    strlcpy(parent_path, full_path, sizeof(parent_path));
-    char *slash = strrchr(parent_path, '/');
-    if (!slash || slash == parent_path) {
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid path");
-    }
-    *slash = '\0';
-
-    struct stat st = {0};
-    if (stat(parent_path, &st) != 0 || !S_ISDIR(st.st_mode)) {
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Parent directory not found");
-    }
-
-    FILE *file = fopen(full_path, "wb");
-    if (!file) {
-        return files_upload_write_error(req, errno);
+    claw_image_cache_writer_t image = {0};
+    bool cached = claw_image_cache_manages(full_path);
+    FILE *file = NULL;
+    if (cached) {
+        if (!req->content_len) {
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid upload size");
+        }
+        if (claw_image_cache_begin(&image, full_path, req->content_len, HTTP_SERVER_UPLOAD_MAX_SIZE) != ESP_OK) {
+            return files_upload_write_error(req, errno);
+        }
+    } else {
+        char parent_path[HTTP_SERVER_PATH_MAX];
+        strlcpy(parent_path, full_path, sizeof(parent_path));
+        char *slash = strrchr(parent_path, '/');
+        if (!slash || slash == parent_path) {
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid path");
+        }
+        *slash = '\0';
+        struct stat st;
+        if (stat(parent_path, &st) != 0 || !S_ISDIR(st.st_mode)) {
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Parent directory not found");
+        }
+        file = fopen(full_path, "wb");
+        if (!file) {
+            return files_upload_write_error(req, errno);
+        }
     }
 
     char *scratch = req->content_len ? http_server_alloc_scratch_buffer() : NULL;
-    if (req->content_len && !scratch) {
-        fclose(file);
-        unlink(full_path);
-        httpd_resp_send_500(req);
-        return ESP_ERR_NO_MEM;
-    }
-
     int remaining = req->content_len;
-    while (remaining > 0) {
+    int write_errno = 0;
+    while (scratch && remaining > 0) {
         int chunk = remaining > HTTP_SERVER_SCRATCH_SIZE ? HTTP_SERVER_SCRATCH_SIZE : remaining;
         int received = httpd_req_recv(req, scratch, chunk);
         errno = 0;
-        if (received <= 0 || fwrite(scratch, 1, received, file) != (size_t)received) {
-            int write_errno = errno;
-            free(scratch);
-            fclose(file);
-            unlink(full_path);
-            return files_upload_write_error(req, write_errno);
+        if (received <= 0 || (cached ? claw_image_cache_write(&image, scratch, received) != ESP_OK
+                                     : fwrite(scratch, 1, received, file) != (size_t)received)) {
+            write_errno = errno;
+            break;
         }
         remaining -= received;
     }
-
     free(scratch);
-    if (fclose(file) != 0) {
-        int write_errno = errno;
-        unlink(full_path);
+    bool complete = remaining == 0;
+    if (cached) {
+        if (claw_image_cache_finish(&image, complete) != ESP_OK) {
+            complete = false;
+            write_errno = errno;
+        }
+    } else {
+        if (fclose(file) != 0) {
+            complete = false;
+            write_errno = errno;
+        }
+        if (!complete) {
+            unlink(full_path);
+        }
+    }
+    if (!complete) {
         return files_upload_write_error(req, write_errno);
     }
     httpd_resp_set_type(req, "application/json");

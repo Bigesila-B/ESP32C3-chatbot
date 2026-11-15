@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "cap_im_attachment.h"
+#include "claw_image_cache.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -20,13 +21,11 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 
-#define CAP_IM_ATTACHMENT_PATH_BUF_SIZE 256
-
 typedef struct {
-    FILE *file;
-    size_t bytes_written;
+    claw_image_cache_writer_t writer;
+    const char *path;
     size_t max_bytes;
-    bool limit_hit;
+    esp_err_t write_error;
 } cap_im_attachment_download_t;
 
 static uint64_t cap_im_attachment_fnv1a64(const char *text)
@@ -210,77 +209,6 @@ const char *cap_im_attachment_normalize_url(const char *url,
     return buf;
 }
 
-static esp_err_t cap_im_attachment_ensure_dir(const char *path)
-{
-    struct stat st = {0};
-
-    if (!path || !path[0]) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    if (stat(path, &st) == 0) {
-        return S_ISDIR(st.st_mode) ? ESP_OK : ESP_FAIL;
-    }
-
-    if (mkdir(path, 0755) != 0 && errno != EEXIST) {
-        return ESP_FAIL;
-    }
-
-    return ESP_OK;
-}
-
-static esp_err_t cap_im_attachment_ensure_parent_dirs(const char *path)
-{
-    char dir[CAP_IM_ATTACHMENT_PATH_BUF_SIZE];
-    char *cursor = NULL;
-    char *slash = NULL;
-    char *create_from = NULL;
-    struct stat st = {0};
-
-    if (!path || !path[0]) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    strlcpy(dir, path, sizeof(dir));
-    slash = strrchr(dir, '/');
-    if (!slash) {
-        return ESP_OK;
-    }
-    *slash = '\0';
-
-    if (dir[0] != '/') {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    for (cursor = dir + 1; *cursor; cursor++) {
-        if (*cursor != '/') {
-            continue;
-        }
-
-        *cursor = '\0';
-        if (stat(dir, &st) == 0 && S_ISDIR(st.st_mode)) {
-            create_from = cursor + 1;
-        }
-        *cursor = '/';
-    }
-
-    if (!create_from) {
-        return ESP_FAIL;
-    }
-
-    for (cursor = create_from; *cursor; cursor++) {
-        if (*cursor == '/') {
-            *cursor = '\0';
-            if (cap_im_attachment_ensure_dir(dir) != ESP_OK) {
-                return ESP_FAIL;
-            }
-            *cursor = '/';
-        }
-    }
-
-    return cap_im_attachment_ensure_dir(dir);
-}
-
 esp_err_t cap_im_attachment_build_saved_paths(const char *root_dir,
                                               const char *platform_dir,
                                               const char *chat_id,
@@ -331,23 +259,23 @@ esp_err_t cap_im_attachment_build_saved_paths(const char *root_dir,
 
 static esp_err_t cap_im_attachment_download_event_handler(esp_http_client_event_t *event)
 {
-    cap_im_attachment_download_t *dl = (cap_im_attachment_download_t *)event->user_data;
-
+    cap_im_attachment_download_t *dl = event->user_data;
     if (!dl || event->event_id != HTTP_EVENT_ON_DATA || event->data_len <= 0) {
         return ESP_OK;
     }
-
-    if (dl->bytes_written + (size_t)event->data_len > dl->max_bytes) {
-        dl->limit_hit = true;
-        return ESP_FAIL;
+    int status = esp_http_client_get_status_code(event->client);
+    if (status < 200 || status >= 300 || dl->write_error != ESP_OK) {
+        return dl->write_error;
     }
-
-    if (fwrite(event->data, 1, (size_t)event->data_len, dl->file) != (size_t)event->data_len) {
-        return ESP_FAIL;
+    if (!dl->writer.file) {
+        int64_t length = esp_http_client_get_content_length(event->client);
+        dl->write_error = length > (int64_t)dl->max_bytes ? ESP_ERR_INVALID_SIZE :
+                          claw_image_cache_begin(&dl->writer, dl->path, length > 0 ? (size_t)length : 0, dl->max_bytes);
     }
-
-    dl->bytes_written += (size_t)event->data_len;
-    return ESP_OK;
+    if (dl->write_error == ESP_OK) {
+        dl->write_error = claw_image_cache_write(&dl->writer, event->data, (size_t)event->data_len);
+    }
+    return dl->write_error;
 }
 
 esp_err_t cap_im_attachment_download_url_to_file(const char *log_tag,
@@ -356,70 +284,51 @@ esp_err_t cap_im_attachment_download_url_to_file(const char *log_tag,
                                                  size_t max_bytes,
                                                  size_t *out_bytes)
 {
-    esp_http_client_config_t config = {0};
-    esp_http_client_handle_t client = NULL;
-    cap_im_attachment_download_t dl = {0};
-    FILE *file = NULL;
-    esp_err_t err;
-    int status;
-
     if (!url || !url[0] || !dest_path || !dest_path[0]) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (cap_im_attachment_ensure_parent_dirs(dest_path) != ESP_OK) {
-        ESP_LOGW(log_tag, "attachment mkdir failed: path=%s errno=%d", dest_path, errno);
-        return ESP_FAIL;
-    }
-
-    file = fopen(dest_path, "wb");
-    if (!file) {
-        ESP_LOGW(log_tag, "attachment fopen failed: path=%s errno=%d", dest_path, errno);
-        return ESP_FAIL;
-    }
-
-    dl.file = file;
-    dl.max_bytes = max_bytes ? max_bytes : (2 * 1024 * 1024);
-
-    config.url = url;
-    config.event_handler = cap_im_attachment_download_event_handler;
-    config.user_data = &dl;
-    config.timeout_ms = 30000;
-    config.buffer_size = 2048;
-    config.buffer_size_tx = 1024;
-    config.crt_bundle_attach = esp_crt_bundle_attach;
-
-    client = esp_http_client_init(&config);
+    cap_im_attachment_download_t dl = {
+        .path = dest_path,
+        .max_bytes = max_bytes ? max_bytes : (2 * 1024 * 1024),
+    };
+    esp_http_client_config_t config = {
+        .url = url,
+        .event_handler = cap_im_attachment_download_event_handler,
+        .user_data = &dl,
+        .timeout_ms = 30000,
+        .buffer_size = 2048,
+        .buffer_size_tx = 1024,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) {
-        fclose(file);
-        remove(dest_path);
         return ESP_FAIL;
     }
 
-    err = esp_http_client_perform(client);
-    status = esp_http_client_get_status_code(client);
+    esp_err_t err = esp_http_client_perform(client);
+    int status = esp_http_client_get_status_code(client);
+    if (dl.write_error != ESP_OK) {
+        err = dl.write_error;
+    } else if (err == ESP_OK && (status < 200 || status >= 300 || !dl.writer.bytes ||
+                                 !esp_http_client_is_complete_data_received(client))) {
+        err = ESP_FAIL;
+    }
     esp_http_client_cleanup(client);
-    fclose(file);
-
-    if (err != ESP_OK || status < 200 || status >= 300 || dl.limit_hit || dl.bytes_written == 0) {
-        ESP_LOGW(log_tag,
-                 "attachment download failed: err=%s http=%d bytes=%u limit_hit=%d url=%s",
-                 esp_err_to_name(err),
-                 status,
-                 (unsigned int)dl.bytes_written,
-                 dl.limit_hit ? 1 : 0,
-                 url);
-        remove(dest_path);
-        if (dl.limit_hit) {
-            return ESP_ERR_INVALID_SIZE;
+    if (dl.writer.file) {
+        esp_err_t finish = claw_image_cache_finish(&dl.writer, err == ESP_OK);
+        if (err == ESP_OK) {
+            err = finish;
         }
-        return err != ESP_OK ? err : ESP_FAIL;
     }
-
+    if (err != ESP_OK) {
+        ESP_LOGW(log_tag, "attachment download failed: err=%s http=%d bytes=%u",
+                 esp_err_to_name(err), status, (unsigned int)dl.writer.bytes);
+        return err;
+    }
     if (out_bytes) {
-        *out_bytes = dl.bytes_written;
+        *out_bytes = dl.writer.bytes;
     }
-
     return ESP_OK;
 }
 
@@ -428,32 +337,22 @@ esp_err_t cap_im_attachment_save_buffer_to_file(const char *log_tag,
                                                 const unsigned char *buf,
                                                 size_t buf_len)
 {
-    FILE *file = NULL;
-
     if (!log_tag || !dest_path || !dest_path[0] || (!buf && buf_len > 0)) {
         return ESP_ERR_INVALID_ARG;
     }
-
-    if (cap_im_attachment_ensure_parent_dirs(dest_path) != ESP_OK) {
-        ESP_LOGW(log_tag, "attachment mkdir failed: path=%s errno=%d", dest_path, errno);
-        return ESP_FAIL;
+    claw_image_cache_writer_t writer;
+    esp_err_t err = claw_image_cache_begin(&writer, dest_path, buf_len, buf_len);
+    if (err == ESP_OK) {
+        err = buf_len ? claw_image_cache_write(&writer, buf, buf_len) : ESP_OK;
+        esp_err_t finish = claw_image_cache_finish(&writer, err == ESP_OK);
+        if (err == ESP_OK) {
+            err = finish;
+        }
     }
-
-    file = fopen(dest_path, "wb");
-    if (!file) {
-        ESP_LOGW(log_tag, "attachment fopen failed: path=%s errno=%d", dest_path, errno);
-        return ESP_FAIL;
+    if (err != ESP_OK) {
+        ESP_LOGW(log_tag, "attachment save failed: path=%s err=%s", dest_path, esp_err_to_name(err));
     }
-
-    if (buf_len > 0 && fwrite(buf, 1, buf_len, file) != buf_len) {
-        fclose(file);
-        remove(dest_path);
-        ESP_LOGW(log_tag, "attachment fwrite failed: path=%s errno=%d", dest_path, errno);
-        return ESP_FAIL;
-    }
-
-    fclose(file);
-    return ESP_OK;
+    return err;
 }
 
 char *cap_im_attachment_build_payload_json(

@@ -150,6 +150,8 @@ static bool cap_im_tg_dedup_check_and_record(const char *update_key)
 
 ### 附件处理
 
+QQ、Telegram、飞书、微信和网页聊天收到的图片共享 1 MiB 缓存。缓存达到上限或可写数据区剩余空间不足时，设备按文件保存时间从旧到新清理，同时为聊天记录等数据预留 64 KiB。下载或上传中断会清理临时文件，正在读取的图片会留到后续清理。聊天记录和其他文件会保留，已清理图片的本地预览可能失效。
+
 附件（图片/文档）的下载是耗时操作，Telegram 后端会异步处理：
 
 1. `tg_poll_task` 将 `cap_im_tg_attachment_job_t` 放入队列。
@@ -182,7 +184,7 @@ static bool cap_im_tg_dedup_check_and_record(const char *update_key)
 |---------|------|------|
 | `tg_gateway` | 轮询网关（事件源） | `EVENT_SOURCE` |
 | `tg_send_message` | 发送文本消息到指定 chat_id | `CALLABLE` |
-| `tg_send_image` | 发送本地图片文件到 Telegram | `CALLABLE` |
+| `tg_send_image` | 发送本地图片或公开的 HTTP(S) 图片链接到 Telegram | `CALLABLE` |
 | `tg_send_file` | 发送本地任意文件到 Telegram | `CALLABLE` |
 
 `tg_send_message` 中，如果输入没有提供 `chat_id`，会从当前调用上下文取值：
@@ -196,7 +198,7 @@ if (cJSON_IsString(chat_id_json) && chat_id_json->valuestring[0]) {
 }
 ```
 
-超长文本会自动分片以适配 Telegram 限制。`tg_send_image` 和 `tg_send_file` 通过 multipart/form-data 上传文件，使用 `stat()` 预先获取精确 `Content-Length`，并通过 `esp_http_client_open` 手动流式写入各 part，避免将整个文件载入内存。
+超长文本会自动分片以适配 Telegram 限制。`tg_send_image` 的 `path` 为公开 HTTP(S) 链接时，由 Telegram 取图。本地图片和文件通过 multipart/form-data 流式上传，使用 `stat()` 获取 `Content-Length`。
 
 ### 配置 API
 

@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 
 #include "ramfs.h"
+#include "claw_image_cache.h"
 #include "wear_levelling.h"
 #include "esp_vfs_fat.h"
 #include "esp_heap_caps.h"
@@ -284,6 +285,10 @@ esp_err_t app_fs_init(void)
 {
     ESP_RETURN_ON_ERROR(app_fs_init_system(), TAG, "Failed to mount system FATFS");
     ESP_RETURN_ON_ERROR(app_fs_init_storage(), TAG, "Failed to mount storage FATFS");
+    esp_err_t cache_err = claw_image_cache_init(s_storage_base_path);
+    if (cache_err != ESP_OK) {
+        ESP_LOGW(TAG, "Image cache unavailable: %s", esp_err_to_name(cache_err));
+    }
 #ifdef CONFIG_SPIRAM
     ESP_RETURN_ON_ERROR(app_fs_init_ramfs(), TAG, "Failed to mount RAMFS");
 #endif
