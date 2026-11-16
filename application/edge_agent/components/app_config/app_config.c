@@ -77,6 +77,10 @@ typedef struct {
 #define APP_DEFAULT_LLM_VISIBLE_CAP_GROUPS   ""
 #define APP_DEFAULT_ENABLED_LUA_MODULES      ""
 #define APP_DEFAULT_TIME_TIMEZONE            "CST-8"
+#define APP_DEFAULT_PERSONA_NAME             ""
+#define APP_DEFAULT_PERSONA_ROLE             ""
+#define APP_DEFAULT_PERSONA_TRAITS           ""
+#define APP_DEFAULT_PERSONA_STYLE            ""
 
 static const app_config_field_t s_fields[] = {
     APP_CONFIG_FIELD(wifi_ssid, "wifi_ssid", APP_WIFI_SSID),
@@ -118,6 +122,11 @@ static const app_config_field_t s_fields[] = {
     APP_CONFIG_FIELD(llm_visible_cap_groups, "vis_cap_groups", APP_DEFAULT_LLM_VISIBLE_CAP_GROUPS),
     APP_CONFIG_FIELD(enabled_lua_modules, "en_lua_mods", APP_DEFAULT_ENABLED_LUA_MODULES),
     APP_CONFIG_FIELD(time_timezone, "time_timezone", APP_DEFAULT_TIME_TIMEZONE),
+    /* NVS 键名限 15 字符，persona_traits（14）仍在范围内 */
+    APP_CONFIG_FIELD(persona_name, "persona_name", APP_DEFAULT_PERSONA_NAME),
+    APP_CONFIG_FIELD(persona_role, "persona_role", APP_DEFAULT_PERSONA_ROLE),
+    APP_CONFIG_FIELD(persona_traits, "persona_traits", APP_DEFAULT_PERSONA_TRAITS),
+    APP_CONFIG_FIELD(persona_style, "persona_style", APP_DEFAULT_PERSONA_STYLE),
 };
 
 // for backward compatibility, migrate from old settings to new settings
@@ -880,6 +889,10 @@ void app_config_to_claw(const app_config_t *config, app_claw_config_t *out)
     strlcpy(out->mcp_server_url, config->mcp_server_url, sizeof(out->mcp_server_url));
     strlcpy(out->mcp_bearer_token, config->mcp_bearer_token, sizeof(out->mcp_bearer_token));
     strlcpy(out->enabled_lua_modules, config->enabled_lua_modules, sizeof(out->enabled_lua_modules));
+    strlcpy(out->persona_name, config->persona_name, sizeof(out->persona_name));
+    strlcpy(out->persona_role, config->persona_role, sizeof(out->persona_role));
+    strlcpy(out->persona_traits, config->persona_traits, sizeof(out->persona_traits));
+    strlcpy(out->persona_style, config->persona_style, sizeof(out->persona_style));
 }
 
 const char *app_config_get_timezone(const app_config_t *config)

@@ -1,6 +1,14 @@
 dependencies:
   espressif/cjson:
     version: "^1.7.19"
+  claw_memory:
+    # 记忆管理接口 /api/memory 需要 claw_memory 的头文件与实现。
+    # 仅靠 CMakeLists 的 REQUIRES 不会把 include 路径传给本组件，
+    # 必须在 manifest 中声明，否则精简构建会报 claw_memory.h 找不到。
+    rules:
+      - if: $CONFIG{APP_CLAW_CAP_MEMORY} == True
+    path: ../../../../components/claw_modules/claw_memory
+
   cap_im_local:
     rules:
       - if: $CONFIG{APP_CLAW_TEXT_ONLY} != True

@@ -61,6 +61,11 @@ typedef struct {
     char llm_visible_cap_groups[APP_CONFIG_STR_LEN];
     char enabled_lua_modules[APP_CONFIG_STR_LEN];
     char time_timezone[APP_CONFIG_TIMEZONE_LEN];
+    /* 人格设定：结构化字段，由后端拼成一段系统提示注入，全部留空则不改变原行为 */
+    char persona_name[64];
+    char persona_role[128];
+    char persona_traits[APP_CONFIG_STR_LEN];
+    char persona_style[APP_CONFIG_STR_LEN];
 } app_config_t;
 
 esp_err_t app_config_init(void);

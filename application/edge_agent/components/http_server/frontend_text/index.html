@@ -1,109 +1,654 @@
 <!doctype html>
 <html lang="zh-CN">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ESP-Claw C3 设置</title>
 <style>
+  :root {
+    --ink: #172b26;
+    --muted: #5b736c;
+    --line: #d3e0dc;
+    --brand: #0e775e;
+    --brand-dark: #0a5846;
+    --bg: #f2f6f4;
+    --card: #ffffff;
+  }
   * { box-sizing: border-box; }
-  body { margin: 0; background: #f2f6f4; color: #172b26; font: 16px/1.5 system-ui, sans-serif; }
-  main { width: min(100% - 2rem, 36rem); margin: 2rem auto; }
-  h1 { margin: 0; font-size: 1.8rem; }
-  p { margin: .5rem 0 1.25rem; }
-  fieldset { margin: 0 0 1rem; border: 1px solid #b9cec6; border-radius: .75rem; padding: 1rem; background: #fff; }
-  legend { padding: 0 .4rem; font-weight: 650; }
-  label { display: block; margin: 0 0 .75rem; }
-  label:last-child { margin-bottom: 0; }
-  input { display: block; width: 100%; margin-top: .25rem; padding: .55rem .65rem; font: inherit; border: 1px solid #9ab5aa; border-radius: .35rem; }
-  :focus-visible { outline: 2px solid #0e775e; outline-offset: 2px; }
-  button { border: 1px solid #135e4c; border-radius: .4rem; background: #135e4c; color: white; padding: .55rem 1rem; font: inherit; cursor: pointer; }
-  button[type=button] { background: white; color: #135e4c; }
-  button:disabled, fieldset:disabled { opacity: .55; cursor: default; }
-  #message { min-height: 1.5em; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 18px; background: var(--card);
+    border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; z-index: 5;
+  }
+  header b { font-size: 16px; letter-spacing: .2px; }
+  #net { margin-left: auto; font-size: 13px; color: var(--muted); text-align: right; }
+  #net.ok { color: var(--brand); }
+  #net.off { color: #a8500b; }
+
+  .shell { display: flex; align-items: flex-start; max-width: 1080px; margin: 0 auto; }
+  nav {
+    flex: 0 0 168px; padding: 18px 10px 18px 18px;
+    display: flex; flex-direction: column; gap: 2px;
+    position: sticky; top: 57px;
+  }
+  nav a {
+    display: block; padding: 9px 12px; border-radius: 7px;
+    color: var(--muted); text-decoration: none; font-size: 14px;
+  }
+  nav a:hover { background: #e7efec; color: var(--ink); }
+  nav a.on { background: var(--brand); color: #fff; }
+
+  main { flex: 1 1 auto; min-width: 0; padding: 18px 18px 64px; }
+  section { display: none; }
+  section.on { display: block; }
+  section > h1 { margin: 4px 0 4px; font-size: 20px; font-weight: 600; }
+  section > p.hint { margin: 0 0 18px; color: var(--muted); font-size: 13px; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 18px; margin-bottom: 14px;
+  }
+  .card > h2 {
+    margin: 0 0 14px; font-size: 14px; font-weight: 600;
+    color: var(--muted); letter-spacing: .2px;
+  }
+  .row { margin-bottom: 14px; }
+  .row:last-child { margin-bottom: 0; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 5px; }
+  label em { font-style: normal; color: #9bb0aa; }
+  input, textarea, select {
+    width: 100%; padding: 9px 11px; font: inherit; color: var(--ink);
+    background: #fbfdfc; border: 1px solid #b8ccc6; border-radius: 7px;
+  }
+  textarea { resize: vertical; line-height: 1.55; }
+  input:focus, textarea:focus, select:focus {
+    outline: 2px solid var(--brand); outline-offset: -1px; border-color: var(--brand);
+  }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } }
+
+  .actions { display: flex; align-items: center; gap: 10px; margin-top: 4px; flex-wrap: wrap; }
+  .actions.spaced { margin-top: 16px; }
+  button {
+    padding: 9px 16px; font: inherit; font-size: 14px; cursor: pointer;
+    border-radius: 8px; border: 1px solid var(--brand-dark);
+    background: var(--brand-dark); color: #fff;
+  }
+  button.ghost { background: #fff; color: var(--brand-dark); }
+  button.danger { background: #fff; color: #a12c2c; border-color: #c98d8d; }
+  button:disabled { opacity: .5; cursor: default; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .stat { background: #f6faf8; border: 1px solid var(--line); border-radius: 9px; padding: 11px 13px; }
+  .stat span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  .stat strong { font-size: 15px; font-weight: 600; word-break: break-all; }
+
+  #chat-card { display: flex; flex-direction: column; height: min(66vh, 560px); padding: 0; overflow: hidden; }
+  #chat-log { flex: 1 1 auto; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 80%; padding: 9px 13px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; font-size: 14px; }
+  .msg.user { align-self: flex-end; background: var(--brand-dark); color: #fff; border-bottom-right-radius: 4px; }
+  .msg.bot { align-self: flex-start; background: #eef4f2; color: var(--ink); border-bottom-left-radius: 4px; }
+  .msg.err { align-self: flex-start; background: #fdeceb; color: #a12c2c; border-bottom-left-radius: 4px; }
+  .msg.meta { align-self: center; background: transparent; color: var(--muted); font-size: 12.5px; padding: 2px; }
+  #chat-bar { display: flex; gap: 10px; padding: 12px; border-top: 1px solid var(--line); background: #fbfdfc; }
+  #chat-input { flex: 1 1 auto; resize: none; min-height: 42px; max-height: 110px; }
+  #chat-send { flex: 0 0 auto; }
+
+  .field-note { margin: 8px 0 0; font-size: 12.5px; color: var(--muted); }
+
+  details.ch { border: 1px solid var(--line); border-radius: 10px; padding: 0 14px; margin-bottom: 10px; background: #fdfefe; }
+  details.ch > summary {
+    cursor: pointer; padding: 13px 0; font-size: 14px; font-weight: 600;
+    list-style: none; display: flex; align-items: center; gap: 8px;
+  }
+  details.ch > summary::-webkit-details-marker { display: none; }
+  details.ch > summary::after { content: "＋"; margin-left: auto; color: var(--muted); font-weight: 400; }
+  details.ch[open] > summary::after { content: "－"; }
+  details.ch .body { padding: 2px 0 16px; }
+  .pill { font-size: 11.5px; padding: 1px 7px; border-radius: 5px; background: #e6f0ec; color: var(--brand-dark); font-weight: 400; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%) translateY(12px);
+    background: #143b32; color: #fff; padding: 10px 18px; border-radius: 9px;
+    font-size: 13.5px; opacity: 0; pointer-events: none; transition: opacity .22s, transform .22s;
+    max-width: calc(100vw - 32px);
+  }
+  #toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast.err { background: #7c2626; }
+
+  @media (max-width: 720px) {
+    .shell { display: block; }
+    nav {
+      position: sticky; top: 57px; z-index: 4; background: var(--bg);
+      flex-direction: row; overflow-x: auto; padding: 8px 12px; gap: 6px;
+      border-bottom: 1px solid var(--line);
+    }
+    nav a { white-space: nowrap; padding: 7px 13px; }
+    main { padding: 14px 14px 60px; }
+    section > h1 { font-size: 18px; }
+    #chat-card { height: 62vh; }
+    .msg { max-width: 88%; }
+  }
 </style>
-<main>
-  <h1>ESP-Claw C3 设置</h1>
-  <p id="network">正在读取网络状态…</p>
-  <form id="settings" autocomplete="off">
-    <fieldset disabled>
-      <legend>Wi-Fi</legend>
-      <label>网络名称 <input name="wifi_ssid" maxlength="32" required></label>
-      <label>Wi-Fi 密码 <input name="wifi_password" type="password" maxlength="63"></label>
-    </fieldset>
-    <fieldset disabled>
-      <legend>对话模型</legend>
-      <label>OpenAI 兼容 API 地址 <input name="llm_base_url" type="url" placeholder="https://api.example.com/v1" maxlength="319"></label>
-      <label>模型名称 <input name="llm_model" maxlength="63"></label>
-      <label>API 密钥 <input name="llm_api_key" type="password" maxlength="319"></label>
-    </fieldset>
-    <fieldset disabled>
-      <legend>QQ 机器人</legend>
-      <label>App ID <input name="qq_app_id" maxlength="31"></label>
-      <label>App Secret <input name="qq_app_secret" type="password" maxlength="319"></label>
-    </fieldset>
-    <button id="save" disabled>保存设置</button>
-    <button id="restart" type="button" disabled>重启设备</button>
-  </form>
-  <p id="message" role="status"></p>
-</main>
+</head>
+<body>
+
+<header>
+  <b>ESP-Claw C3</b>
+  <span id="net">正在读取状态…</span>
+</header>
+
+<div class="shell">
+  <nav>
+    <a href="#status">设备状态</a>
+    <a href="#chat">对话</a>
+    <a href="#persona">人格设定</a>
+    <a href="#memory">长期记忆</a>
+    <a href="#llm">对话模型</a>
+    <a href="#im">聊天通道</a>
+    <a href="#wifi">网络设置</a>
+  </nav>
+
+  <main>
+    <section id="page-status">
+      <h1>设备状态</h1>
+      <p class="hint">这里显示设备当前的网络与存储情况，改动配置后需要重启才会生效。</p>
+      <div class="card">
+        <h2>运行概况</h2>
+        <div class="stats">
+          <div class="stat"><span>网络</span><strong id="s-net">—</strong></div>
+          <div class="stat"><span>IP 地址</span><strong id="s-ip">—</strong></div>
+          <div class="stat"><span>配网热点</span><strong id="s-ap">—</strong></div>
+          <div class="stat"><span>存储根目录</span><strong id="s-store">—</strong></div>
+        </div>
+        <div class="actions spaced">
+          <button class="ghost" id="btn-refresh">刷新状态</button>
+          <button class="danger" id="btn-restart">重启设备</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="page-chat">
+      <h1>对话</h1>
+      <p class="hint">直接和板子上的模型聊天，使用独立的网页会话，不影响 QQ 等通道的历史。回复在设备本机生成，较慢时请耐心等待。</p>
+      <div class="card" id="chat-card">
+        <div id="chat-log"></div>
+        <div id="chat-bar">
+          <textarea id="chat-input" rows="1" maxlength="500" placeholder="说点什么…（Enter 发送，Shift+Enter 换行）" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+          <button id="chat-send">发送</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="page-persona">
+      <h1>人格设定</h1>
+      <p class="hint">这段文字作为设备的人格与自我认知，每次对话都会注入模型上下文。保存后立即生效，无需重启。留空则使用系统默认人格。</p>
+      <div class="card">
+        <h2>人格描述（soul.md）</h2>
+        <div class="row">
+          <textarea id="persona-text" rows="16" maxlength="2500" placeholder="# Soul&#10;I am ...&#10;&#10;## Core Character&#10;- ...&#10;&#10;## Interaction Style&#10;- ..."></textarea>
+        </div>
+        <p class="field-note">建议写清三件事：你是谁、性格怎样、怎么说话。支持 Markdown，中英文都可以。</p>
+        <div class="actions">
+          <button id="persona-save">保存人格</button>
+          <button class="ghost" id="persona-reload">重新读取</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="page-memory">
+      <h1>长期记忆</h1>
+      <p class="hint">下面是模型跨会话记住的内容，<b>每行一条</b>。可以改某一行、删掉某一行，或在末尾加新的一行，保存后按行同步到设备。</p>
+      <div class="card">
+        <h2>记忆内容</h2>
+        <div class="row">
+          <textarea id="memory-text" rows="16" placeholder="例如：&#10;用户的名字是毕哥斯拉，做嵌入式开发&#10;用户手上有一块 4MB Flash 的 ESP32-C3&#10;用户偏好中文回答，喜欢直接给结论"></textarea>
+        </div>
+        <p class="field-note">单条建议不超过 80 个汉字，空行会被忽略。清空全部内容会删除所有记忆。</p>
+        <div class="actions">
+          <button id="memory-save">保存记忆</button>
+          <button class="ghost" id="memory-reload">重新读取</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="page-llm">
+      <h1>对话模型</h1>
+      <p class="hint">支持任何兼容 OpenAI 接口的服务。保存后重启生效。</p>
+      <div class="card">
+        <h2>接口配置</h2>
+        <div class="row">
+          <label>接口地址</label>
+          <input name="llm_base_url" type="url" maxlength="300" placeholder="https://api.example.com/v1" autocapitalize="off" autocorrect="off" spellcheck="false">
+        </div>
+        <div class="row">
+          <label>模型名称</label>
+          <input name="llm_model" maxlength="60" placeholder="例如：qwen-plus" autocapitalize="off" autocorrect="off" spellcheck="false">
+        </div>
+        <div class="row">
+          <label>API 密钥</label>
+          <input name="llm_api_key" type="password" maxlength="300" placeholder="sk-..." autocapitalize="off" autocorrect="off" spellcheck="false">
+        </div>
+        <div class="grid2">
+          <div class="row">
+            <label>单次最大 Token</label>
+            <input name="llm_max_tokens" inputmode="numeric" maxlength="8" placeholder="512" autocapitalize="off" autocorrect="off" spellcheck="false">
+          </div>
+          <div class="row">
+            <label>上下文窗口 <em>0 表示自动匹配</em></label>
+            <input name="llm_context_window" inputmode="numeric" maxlength="8" placeholder="4096" autocapitalize="off" autocorrect="off" spellcheck="false">
+          </div>
+        </div>
+        <div class="actions">
+          <button data-save="llm">保存模型设置</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="page-im">
+      <h1>聊天通道</h1>
+      <p class="hint">当前固件已编译 QQ、飞书、Telegram、微信四个通道。填好凭证并重启即可生效，留空的通道不会启动。</p>
+      <div class="card">
+        <h2>已启用的通道</h2>
+
+        <details class="ch" open>
+          <summary>QQ 机器人 <span class="pill">官方 QQBot</span></summary>
+          <div class="body">
+            <div class="row">
+              <label>App ID</label>
+              <input name="qq_app_id" maxlength="30" autocapitalize="off" autocorrect="off" spellcheck="false">
+            </div>
+            <div class="row">
+              <label>App Secret</label>
+              <input name="qq_app_secret" type="password" maxlength="300" autocapitalize="off" autocorrect="off" spellcheck="false">
+            </div>
+            <div class="row">
+              <label>消息类型 <em>0 文本 / 2 Markdown</em></label>
+              <input name="qq_msg_type" inputmode="numeric" maxlength="4" placeholder="0" autocapitalize="off" autocorrect="off" spellcheck="false">
+            </div>
+          </div>
+        </details>
+
+        <details class="ch">
+          <summary>飞书 <span class="pill">WebSocket 长连接</span></summary>
+          <div class="body">
+            <div class="row">
+              <label>App ID</label>
+              <input name="feishu_app_id" maxlength="60" autocapitalize="off" autocorrect="off" spellcheck="false">
+            </div>
+            <div class="row">
+              <label>App Secret</label>
+              <input name="feishu_app_secret" type="password" maxlength="300" autocapitalize="off" autocorrect="off" spellcheck="false">
+            </div>
+          </div>
+        </details>
+
+        <details class="ch">
+          <summary>Telegram <span class="pill">Bot API</span></summary>
+          <div class="body">
+            <div class="row">
+              <label>Bot Token</label>
+              <input name="tg_bot_token" type="password" maxlength="300" autocapitalize="off" autocorrect="off" spellcheck="false">
+            </div>
+          </div>
+        </details>
+
+        <details class="ch">
+          <summary>微信 <span class="pill">ClawBot</span></summary>
+          <div class="body">
+            <div class="row">
+              <label>Token</label>
+              <input name="wechat_token" type="password" maxlength="300" autocapitalize="off" autocorrect="off" spellcheck="false">
+            </div>
+            <div class="row">
+              <label>服务地址</label>
+              <input name="wechat_base_url" maxlength="300" placeholder="https://ilinkai.weixin.qq.com" autocapitalize="off" autocorrect="off" spellcheck="false">
+            </div>
+            <div class="row">
+              <label>CDN 地址</label>
+              <input name="wechat_cdn_base_url" maxlength="300" placeholder="https://novac2c.cdn.weixin.qq.com/c2c" autocapitalize="off" autocorrect="off" spellcheck="false">
+            </div>
+            <div class="row">
+              <label>账号 ID</label>
+              <input name="wechat_account_id" maxlength="30" placeholder="default" autocapitalize="off" autocorrect="off" spellcheck="false">
+            </div>
+          </div>
+        </details>
+
+        <div class="actions">
+          <button data-save="im">保存通道配置</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="page-wifi">
+      <h1>网络设置</h1>
+      <p class="hint">同时提供已连 Wi-Fi 与配网热点两组参数，修改后重启生效。</p>
+      <div class="card">
+        <h2>连接路由器</h2>
+        <div class="row">
+          <label>Wi-Fi 名称</label>
+          <input name="wifi_ssid" maxlength="31" autocapitalize="off" autocorrect="off" spellcheck="false">
+        </div>
+        <div class="row">
+          <label>Wi-Fi 密码 <em>开放网络留空</em></label>
+          <input name="wifi_password" type="password" maxlength="63" autocapitalize="off" autocorrect="off" spellcheck="false">
+        </div>
+      </div>
+      <div class="card">
+        <h2>配网热点</h2>
+        <div class="row">
+          <label>热点名称</label>
+          <input name="ap_ssid" maxlength="31" autocapitalize="off" autocorrect="off" spellcheck="false">
+        </div>
+        <div class="row">
+          <label>热点密码 <em>留空为开放热点</em></label>
+          <input name="ap_password" type="password" maxlength="63" autocapitalize="off" autocorrect="off" spellcheck="false">
+        </div>
+        <div class="row">
+          <label>联网后行为</label>
+          <select name="ap_behavior">
+            <option value="keep">保留热点</option>
+            <option value="close_on_sta">联网后关闭热点</option>
+          </select>
+        </div>
+        <div class="actions">
+          <button data-save="wifi">保存网络设置</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
 <script>
-  const form = document.querySelector('#settings');
-  const fields = [...form.querySelectorAll('input')];
-  const save = document.querySelector('#save');
-  const restart = document.querySelector('#restart');
-  const network = document.querySelector('#network');
-  const message = document.querySelector('#message');
+(function () {
+  "use strict";
 
-  async function api(path, body) {
-    const response = await fetch(path, body === undefined ? {cache: 'no-store'} : {
-      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
-    });
-    if (!response.ok) throw new Error(await response.text());
-    return response.json();
+  var PAGE_FIELDS = {
+    llm: ["llm_base_url", "llm_model", "llm_api_key", "llm_max_tokens", "llm_context_window"],
+    im: ["qq_app_id", "qq_app_secret", "qq_msg_type", "feishu_app_id", "feishu_app_secret",
+         "tg_bot_token", "wechat_token", "wechat_base_url", "wechat_cdn_base_url", "wechat_account_id"],
+    wifi: ["wifi_ssid", "wifi_password", "ap_ssid", "ap_password", "ap_behavior"]
+  };
+
+  var loaded = {};
+  var toastTimer = null;
+  var booted = false;
+  var chatBusy = false;
+
+  function $(id) { return document.getElementById(id); }
+
+  function toast(text, isError) {
+    var box = $("toast");
+    box.textContent = text;
+    box.className = "on" + (isError ? " err" : "");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { box.className = ""; }, 3200);
   }
 
-  async function load() {
-    try {
-      const status = await api('/api/status');
-      network.textContent = status.wifi_connected ? '已联网 · ' + status.ip : '配网热点 · ' + status.ap_ssid;
-    } catch {
-      network.textContent = '暂时无法读取网络状态';
+  async function api(path, options) {
+    var response = await fetch(path, options || { cache: "no-store" });
+    var text = await response.text();
+    if (!response.ok) {
+      throw new Error(text || ("HTTP " + response.status));
     }
-    try {
-      const config = await api('/api/config?fields=' + fields.map(field => field.name).join(','));
-      for (const field of fields) field.value = config[field.name] ?? '';
-      for (const group of form.querySelectorAll('fieldset')) group.disabled = false;
-      save.disabled = restart.disabled = false;
-    } catch {
-      message.textContent = '无法读取设置，请刷新页面重试。';
+    if (!text) return {};
+    var type = response.headers.get("content-type") || "";
+    if (type.indexOf("json") < 0 && text.charAt(0) !== "{") {
+      throw new Error("设备返回了非 JSON 响应，接口可能未启用");
     }
+    return JSON.parse(text);
   }
 
-  form.addEventListener('submit', async event => {
-    event.preventDefault();
-    save.disabled = restart.disabled = true;
+  async function loadStatus() {
     try {
-      const config = Object.fromEntries(new FormData(form));
-      config.llm_backend_type = 'openai_compatible';
-      await api('/api/config', config);
-      message.textContent = '设置已保存，重启设备后生效。';
+      var s = await api("/api/status");
+      var el = $("net");
+      el.textContent = s.wifi_connected ? "已联网 · " + (s.ip || "—") : "热点 · " + (s.ap_ssid || "—");
+      el.className = s.wifi_connected ? "ok" : "off";
+
+      $("s-net").textContent = (s.wifi_connected ? "已联网" : "配网模式") + (s.wifi_mode ? " (" + s.wifi_mode + ")" : "");
+      $("s-ip").textContent = s.ip || "—";
+      $("s-ap").textContent = s.ap_active ? (s.ap_ssid || "已开启") : "未开启";
+      $("s-store").textContent = s.storage_base_path || "—";
     } catch (error) {
-      message.textContent = '保存失败 · ' + error.message;
-    } finally {
-      save.disabled = restart.disabled = false;
+      var box = $("net");
+      box.textContent = "无法读取状态";
+      box.className = "off";
     }
-  });
+  }
 
-  restart.addEventListener('click', async () => {
-    save.disabled = restart.disabled = true;
+  async function loadConfig(page) {
+    if (loaded[page] === "ready") return;
+    var fields = PAGE_FIELDS[page];
+    var data = await api("/api/config?fields=" + fields.join(","));
+    var box = $("page-" + page);
+    fields.forEach(function (name) {
+      var input = box.querySelector('[name="' + name + '"]');
+      if (!input) return;
+      input.value = data[name] == null ? "" : data[name];
+      if (name === "ap_behavior" && !input.value) input.value = "keep";
+    });
+    loaded[page] = "ready";
+  }
+
+  async function savePage(page, button) {
+    if (loaded[page] !== "ready") {
+      toast("配置尚未读取成功，已阻止保存，请刷新页面重试", true);
+      return;
+    }
+    var box = $("page-" + page);
+    var body = {};
+    box.querySelectorAll("[name]").forEach(function (input) {
+      body[input.name] = input.value;
+    });
+    if (page === "llm") body.llm_backend_type = "openai_compatible";
+
+    button.disabled = true;
     try {
-      await api('/api/restart', {});
-      message.textContent = '设备正在重启，请稍后重新连接。';
-    } catch {
-      message.textContent = '重启请求失败，请重试。';
-      save.disabled = restart.disabled = false;
+      await api("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      loaded[page] = false;
+      toast("已保存，重启设备后生效");
+    } catch (error) {
+      toast("保存失败：" + error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function loadPersona() {
+    try {
+      var data = await api("/api/memory/doc?name=soul.md");
+      $("persona-text").value = data.content || "";
+    } catch (error) {
+      toast("读取人格失败：" + error.message, true);
+    }
+  }
+
+  async function savePersona(button) {
+    button.disabled = true;
+    try {
+      await api("/api/memory/doc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "soul.md", content: $("persona-text").value })
+      });
+      toast("人格已保存，下次对话立即生效");
+    } catch (error) {
+      toast("保存失败：" + error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function loadMemoryText() {
+    try {
+      var items = await api("/api/memory");
+      var lines = (Array.isArray(items) ? items : [])
+        .map(function (item) { return (item.content || "").trim(); })
+        .filter(function (line) { return line.length > 0; });
+      $("memory-text").value = lines.join("\n");
+    } catch (error) {
+      toast("读取记忆失败：" + error.message, true);
+    }
+  }
+
+  async function saveMemoryText(button) {
+    var raw = $("memory-text").value.split("\n");
+    var items = [];
+    for (var i = 0; i < raw.length; i++) {
+      var line = raw[i].trim();
+      if (line) items.push(line);
+    }
+    button.disabled = true;
+    try {
+      var res = await api("/api/memory/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items })
+      });
+      toast("已同步：保留 " + (res.kept || 0) + " 条，新增 " + (res.added || 0) + " 条，删除 " + (res.removed || 0) + " 条");
+      await loadMemoryText();
+    } catch (error) {
+      toast("保存失败：" + error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function appendMsg(kind, text) {
+    var log = $("chat-log");
+    var div = document.createElement("div");
+    div.className = "msg " + kind;
+    div.textContent = text;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    return div;
+  }
+
+  async function sendChat() {
+    if (chatBusy) return;
+    var input = $("chat-input");
+    var text = input.value.trim();
+    if (!text) return;
+
+    appendMsg("user", text);
+    input.value = "";
+    input.style.height = "auto";
+
+    chatBusy = true;
+    $("chat-send").disabled = true;
+    var pending = appendMsg("meta", "正在思考…");
+
+    try {
+      var res = await api("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text })
+      });
+      pending.remove();
+      if (res.ok && res.reply) {
+        appendMsg("bot", res.reply);
+      } else {
+        appendMsg("err", res.error || "模型没有返回内容");
+      }
+    } catch (error) {
+      pending.remove();
+      appendMsg("err", "请求失败：" + error.message);
+    } finally {
+      chatBusy = false;
+      $("chat-send").disabled = false;
+      input.focus();
+    }
+  }
+
+  function autoGrow(el) {
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 110) + "px";
+  }
+
+  async function route() {
+    var name = location.hash.replace("#", "") || "status";
+    if (!$("page-" + name)) name = "status";
+
+    document.querySelectorAll("main section").forEach(function (section) {
+      section.classList.toggle("on", section.id === "page-" + name);
+    });
+    document.querySelectorAll("nav a").forEach(function (link) {
+      link.classList.toggle("on", link.getAttribute("href") === "#" + name);
+    });
+    window.scrollTo(0, 0);
+
+    try {
+      if (!booted) {
+        booted = true;
+        await loadStatus();
+      }
+      if (name === "status") await loadStatus();
+      else if (name === "persona") await loadPersona();
+      else if (name === "memory") await loadMemoryText();
+      else if (name === "chat") {
+        var log = $("chat-log");
+        log.scrollTop = log.scrollHeight;
+      } else if (PAGE_FIELDS[name]) await loadConfig(name);
+    } catch (error) {
+      toast("加载失败：" + error.message, true);
+    }
+  }
+
+  document.querySelectorAll("[data-save]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      savePage(button.getAttribute("data-save"), button);
+    });
+  });
+
+  $("btn-refresh").addEventListener("click", async function () {
+    var button = this;
+    button.disabled = true;
+    await loadStatus();
+    button.disabled = false;
+  });
+
+  $("btn-restart").addEventListener("click", async function () {
+    if (!confirm("确认重启设备？网页会短暂断开。")) return;
+    try {
+      await api("/api/restart", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      toast("设备正在重启，请稍后重新连接");
+    } catch (error) {
+      toast("重启请求失败：" + error.message, true);
     }
   });
 
-  load();
+  $("persona-save").addEventListener("click", function () { savePersona(this); });
+  $("persona-reload").addEventListener("click", loadPersona);
+  $("memory-save").addEventListener("click", function () { saveMemoryText(this); });
+  $("memory-reload").addEventListener("click", loadMemoryText);
+
+  $("chat-send").addEventListener("click", sendChat);
+  $("chat-input").addEventListener("input", function () { autoGrow(this); });
+  $("chat-input").addEventListener("keydown", function (event) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      sendChat();
+    }
+  });
+
+  window.addEventListener("hashchange", route);
+  route();
+})();
 </script>
+</body>
 </html>

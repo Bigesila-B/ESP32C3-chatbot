@@ -484,12 +484,17 @@ static esp_err_t app_cap_register_im_feishu(const app_claw_config_t *config,
     ESP_RETURN_ON_ERROR(cap_im_feishu_register_group(),
                         TAG, "Failed to register Feishu group");
 
+#if CONFIG_APP_CLAW_TEXT_ONLY
+    /* 精简版不下载入站附件：storage 仅 768K，且 TEXT_ONLY 无法辨识图片内容 */
+    (void)paths;
+#else
     ESP_RETURN_ON_ERROR(cap_im_feishu_set_attachment_config(&(cap_im_feishu_attachment_config_t) {
                             .storage_root_dir = paths->im_attachment_root,
                             .max_inbound_file_bytes = APP_IM_ATTACHMENT_MAX_BYTES,
                             .enable_inbound_attachments = true,
                         }),
                         TAG, "Failed to set Feishu attachment config");
+#endif
 
     if (config->feishu_app_id[0] && config->feishu_app_secret[0]) {
         ESP_RETURN_ON_ERROR(cap_im_feishu_set_credentials(config->feishu_app_id,
@@ -516,12 +521,16 @@ static esp_err_t app_cap_register_im_tg(const app_claw_config_t *config,
     ESP_RETURN_ON_ERROR(cap_im_tg_register_group(),
                         TAG, "Failed to register Telegram group");
 
+#if CONFIG_APP_CLAW_TEXT_ONLY
+    (void)paths;
+#else
     ESP_RETURN_ON_ERROR(cap_im_tg_set_attachment_config(&(cap_im_tg_attachment_config_t) {
                             .storage_root_dir = paths->im_attachment_root,
                             .max_inbound_file_bytes = APP_IM_ATTACHMENT_MAX_BYTES,
                             .enable_inbound_attachments = true,
                         }),
                         TAG, "Failed to set Telegram attachment config");
+#endif
 
     if (config->tg_bot_token[0]) {
         ESP_RETURN_ON_ERROR(cap_im_tg_set_token(config->tg_bot_token),
@@ -536,12 +545,16 @@ static esp_err_t app_cap_register_im_tg(const app_claw_config_t *config,
 static esp_err_t app_cap_prepare_im_wechat(const app_claw_config_t *config,
                                            const app_claw_storage_paths_t *paths)
 {
+#if CONFIG_APP_CLAW_TEXT_ONLY
+    (void)paths;
+#else
     ESP_RETURN_ON_ERROR(cap_im_wechat_set_attachment_config(&(cap_im_wechat_attachment_config_t) {
                             .storage_root_dir = paths->im_attachment_root,
                             .max_inbound_file_bytes = APP_IM_ATTACHMENT_MAX_BYTES,
                             .enable_inbound_attachments = true,
                         }),
                         TAG, "Failed to set WeChat attachment config");
+#endif
 
     if (config->wechat_token[0] && config->wechat_base_url[0]) {
         ESP_RETURN_ON_ERROR(cap_im_wechat_set_client_config(&(cap_im_wechat_client_config_t) {

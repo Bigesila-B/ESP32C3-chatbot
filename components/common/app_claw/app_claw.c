@@ -60,7 +60,7 @@ static const char *APP_STARTUP_EVENT_KEY = "boot_completed";
 #endif
 
 #if CONFIG_APP_CLAW_TEXT_ONLY
-#define APP_SYSTEM_PROMPT "You are ESP-Claw, a QQ chat assistant. Reply briefly in the user's language.\n"
+#define APP_SYSTEM_PROMPT "You are ESP-Claw, an IM chat assistant. Reply briefly in the user's language.\n"
 #define APP_ROOT_AGENT_SYSTEM_PROMPT ""
 #define APP_SUBAGENT_SYSTEM_PROMPT ""
 #else
@@ -617,6 +617,53 @@ static esp_err_t app_claw_publish_startup_event(void)
 #endif
 
 #if CONFIG_APP_CLAW_CAP_CORE
+/* 人格注入：直接读取 DATA 根下的 memory/soul.md。
+ * 比依赖 context provider 更直观 —— 网页改完文件，下一次对话立即生效。
+ * claw_core 每次请求都会 dup system_prompt，因此缓冲必须是长期有效的静态存储。 */
+#define APP_PERSONA_PROMPT_BUF_SIZE 4096
+#define APP_PERSONA_FILE_MAX        1800
+
+static char s_persona_prompt[APP_PERSONA_PROMPT_BUF_SIZE];
+
+static const char *app_claw_build_system_prompt(void)
+{
+    char path[96];
+    if (claw_paths_join(CLAW_PATH_DATA, "memory/soul.md", path, sizeof(path)) != ESP_OK) {
+        return APP_SYSTEM_PROMPT;
+    }
+
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        return APP_SYSTEM_PROMPT;
+    }
+
+    /* 从系统提示末尾开始写人格正文，省掉一次大缓冲拷贝 */
+    size_t base = strlen(APP_SYSTEM_PROMPT);
+    if (base + 24 >= sizeof(s_persona_prompt)) {
+        fclose(fp);
+        return APP_SYSTEM_PROMPT;
+    }
+    memcpy(s_persona_prompt, APP_SYSTEM_PROMPT, base);
+    memcpy(s_persona_prompt + base, "\n\n## Persona\n", 14);
+    size_t off = base + 14;
+
+    size_t room = sizeof(s_persona_prompt) - off - 1;
+    if (room > APP_PERSONA_FILE_MAX) {
+        room = APP_PERSONA_FILE_MAX;
+    }
+    size_t n = fread(s_persona_prompt + off, 1, room, fp);
+    fclose(fp);
+
+    if (n == 0) {
+        return APP_SYSTEM_PROMPT;
+    }
+    off += n;
+    s_persona_prompt[off] = '\0';
+
+    ESP_LOGD(TAG, "persona injected from soul.md: %u bytes", (unsigned)n);
+    return s_persona_prompt;
+}
+
 static void app_claw_fill_core_config(const app_claw_config_t *config,
                                       uint32_t max_tool_iterations,
                                       claw_core_config_t *core_config)
@@ -637,7 +684,7 @@ static void app_claw_fill_core_config(const app_claw_config_t *config,
 #endif
     core_config->image_remote_url_only = app_claw_bool_is_true(config->llm_image_remote_url_only);
     core_config->instance_id = 0;
-    core_config->system_prompt = APP_SYSTEM_PROMPT;
+    core_config->system_prompt = app_claw_build_system_prompt();
 #if CONFIG_APP_CLAW_CAP_MEMORY
 #if CONFIG_APP_CLAW_MEMORY_MODE_FULL
     core_config->persist_context = claw_memory_persist_context_callback;

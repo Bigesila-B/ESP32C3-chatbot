@@ -47,6 +47,11 @@ typedef struct {
 } config_field_def_t;
 
 static const config_field_def_t CONFIG_FIELDS[] = {
+    CONFIG_FIELD("persona",      persona_name),
+    CONFIG_FIELD("persona",      persona_role),
+    CONFIG_FIELD("persona",      persona_traits),
+    CONFIG_FIELD("persona",      persona_style),
+
     CONFIG_FIELD("wifi",         wifi_ssid),
     CONFIG_FIELD("wifi",         wifi_password),
     CONFIG_FIELD("wifi",         ap_ssid),

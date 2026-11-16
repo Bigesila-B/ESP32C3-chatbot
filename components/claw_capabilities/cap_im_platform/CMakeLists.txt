@@ -4,10 +4,11 @@ set(srcs
 )
 
 if(CONFIG_APP_CLAW_CAP_IM_FEISHU)
-    list(APPEND srcs
-        "src/cap_im_feishu.c"
-        "src/cmd_cap_im_feishu.c"
-    )
+    list(APPEND srcs "src/cap_im_feishu.c")
+    # 精简版不启用 CLI，命令行文件依赖 esp_console，排除以省空间
+    if(NOT CONFIG_APP_CLAW_TEXT_ONLY)
+        list(APPEND srcs "src/cmd_cap_im_feishu.c")
+    endif()
 endif()
 
 if(CONFIG_APP_CLAW_CAP_IM_QQ)
@@ -18,17 +19,17 @@ if(CONFIG_APP_CLAW_CAP_IM_QQ)
 endif()
 
 if(CONFIG_APP_CLAW_CAP_IM_TG)
-    list(APPEND srcs
-        "src/cap_im_tg.c"
-        "src/cmd_cap_im_tg.c"
-    )
+    list(APPEND srcs "src/cap_im_tg.c")
+    if(NOT CONFIG_APP_CLAW_TEXT_ONLY)
+        list(APPEND srcs "src/cmd_cap_im_tg.c")
+    endif()
 endif()
 
 if(CONFIG_APP_CLAW_CAP_IM_WECHAT)
-    list(APPEND srcs
-        "src/cap_im_wechat.c"
-        "src/cmd_cap_im_wechat.c"
-    )
+    list(APPEND srcs "src/cap_im_wechat.c")
+    if(NOT CONFIG_APP_CLAW_TEXT_ONLY)
+        list(APPEND srcs "src/cmd_cap_im_wechat.c")
+    endif()
 endif()
 
 idf_component_register(

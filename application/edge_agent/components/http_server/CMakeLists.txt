@@ -17,6 +17,7 @@ set(http_server_srcs
     "http_server_assets.c"
     "http_server_config_api.c"
     "http_server_status_api.c"
+    "http_server_chat_api.c"
     "http_server_json.c"
     "http_server_utils.c"
 )
@@ -30,6 +31,12 @@ set(http_server_requires
     esp_http_server
     heap
 )
+
+# 记忆管理接口在精简版同样需要，放在 TEXT_ONLY 分支之外
+if(CONFIG_APP_CLAW_CAP_MEMORY)
+    list(APPEND http_server_srcs "http_server_memory_api.c")
+    list(APPEND http_server_requires claw_memory)
+endif()
 
 if(CONFIG_APP_CLAW_TEXT_ONLY)
     set(http_server_assets "${CMAKE_CURRENT_LIST_DIR}/frontend_text/index.html")

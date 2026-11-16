@@ -62,6 +62,11 @@ typedef struct {
     char enabled_cap_groups[APP_CLAW_STR_LEN];
     char llm_visible_cap_groups[APP_CLAW_STR_LEN];
     char enabled_lua_modules[APP_CLAW_STR_LEN];
+    /* 人格设定，全部为空时不注入任何内容 */
+    char persona_name[APP_CLAW_MODEL_LEN];
+    char persona_role[128];
+    char persona_traits[APP_CLAW_STR_LEN];
+    char persona_style[APP_CLAW_STR_LEN];
 } app_claw_config_t;
 
 typedef esp_err_t (*app_claw_save_config_fn)(const app_claw_config_t *config,
