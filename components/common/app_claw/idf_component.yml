@@ -39,7 +39,7 @@ dependencies:
 
   cap_micropython:
     rules:
-      - if: $CONFIG{APP_CLAW_CAP_MICROPYTHON} == True
+      - if: target == esp32s3 && $CONFIG{SPIRAM} == True && $CONFIG{APP_CLAW_CAP_MICROPYTHON} == True
     path: ../../claw_capabilities/cap_micropython
 
   cap_mcp_client:

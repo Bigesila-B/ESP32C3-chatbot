@@ -10,6 +10,7 @@
 
 #include "claw_session_mgr.h"
 #include "esp_err.h"
+#include "sdkconfig.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,6 +33,9 @@ typedef struct {
     claw_session_policy_t session_policy;
     char *text;
     char *payload_json;
+#if CONFIG_APP_CLAW_TEXT_ONLY
+    char *reply_to_message_id;  /**< Full transport ID, owned by a cloned event. */
+#endif
 } claw_event_t;
 
 esp_err_t claw_event_clone(const claw_event_t *src, claw_event_t *dst);

@@ -11,10 +11,10 @@ if(CONFIG_APP_CLAW_CAP_IM_FEISHU)
 endif()
 
 if(CONFIG_APP_CLAW_CAP_IM_QQ)
-    list(APPEND srcs
-        "src/cap_im_qq.c"
-        "src/cmd_cap_im_qq.c"
-    )
+    list(APPEND srcs "src/cap_im_qq.c")
+    if(NOT CONFIG_APP_CLAW_TEXT_ONLY)
+        list(APPEND srcs "src/cmd_cap_im_qq.c")
+    endif()
 endif()
 
 if(CONFIG_APP_CLAW_CAP_IM_TG)

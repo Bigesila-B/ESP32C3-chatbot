@@ -425,7 +425,7 @@ void app_main(void)
         ESP_LOGW(TAG, "Chat help unavailable: %s", esp_err_to_name(help_err));
     }
 #endif
-#if CONFIG_APP_CLAW_CAP_IM_LOCAL
+#if CONFIG_APP_CLAW_CAP_IM_LOCAL && !CONFIG_APP_CLAW_TEXT_ONLY
     ESP_ERROR_CHECK(http_server_webim_bind_im());
 #endif
 

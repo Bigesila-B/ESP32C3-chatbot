@@ -59,6 +59,11 @@ static const char *APP_STARTUP_EVENT_TYPE = "startup";
 static const char *APP_STARTUP_EVENT_KEY = "boot_completed";
 #endif
 
+#if CONFIG_APP_CLAW_TEXT_ONLY
+#define APP_SYSTEM_PROMPT "You are ESP-Claw, a QQ chat assistant. Reply briefly in the user's language.\n"
+#define APP_ROOT_AGENT_SYSTEM_PROMPT ""
+#define APP_SUBAGENT_SYSTEM_PROMPT ""
+#else
 #define APP_SYSTEM_PROMPT_COMMON \
     "You are the ESP-Claw. " \
     "Answer briefly and plainly. " \
@@ -102,6 +107,7 @@ static const char *APP_STARTUP_EVENT_KEY = "boot_completed";
 #define APP_SYSTEM_PROMPT \
     APP_SYSTEM_PROMPT_COMMON \
     APP_SYSTEM_PROMPT_SUFFIX
+#endif
 
 #define APP_CLAW_LAUNCHER_OUTPUT_LEN 128
 #define APP_CLAW_UI_JOBS_OUTPUT_LEN 4096
@@ -625,8 +631,10 @@ static void app_claw_fill_core_config(const app_claw_config_t *config,
     core_config->timeout_ms = (uint32_t)strtoul(config->llm_timeout_ms, NULL, 10);
     core_config->max_tokens = (uint32_t)strtoul(config->llm_max_tokens, NULL, 10);
     core_config->image_max_bytes = (size_t)strtoul(config->llm_default_image_max_bytes, NULL, 10);
+#if !CONFIG_APP_CLAW_TEXT_ONLY
     core_config->supports_tools = app_claw_bool_is_true(config->llm_supports_tools);
     core_config->supports_vision = app_claw_bool_is_true(config->llm_supports_vision);
+#endif
     core_config->image_remote_url_only = app_claw_bool_is_true(config->llm_image_remote_url_only);
     core_config->instance_id = 0;
     core_config->system_prompt = APP_SYSTEM_PROMPT;
@@ -805,7 +813,9 @@ esp_err_t app_claw_start(const app_claw_config_t *config)
             claw_memory_long_term_lightweight_provider,
 #endif
             claw_memory_session_history_provider,
+#if !CONFIG_APP_CLAW_TEXT_ONLY
             claw_skill_skills_list_provider,
+#endif
         };
         const char *root_agent_id = NULL;
 

@@ -88,3 +88,19 @@ import LinkToSource from '@/components/LinkToSource.astro';
    idf.py flash monitor
    ```
 </Steps>
+
+## ESP32-C3 4 MB text edition
+
+Use a separate checkout for the C3 firmware to keep the existing S3 build directory. Run these commands from `application/edge_agent` with the C3 serial port in place of `<port>`.
+
+```bash
+idf.py bmgr -c ./boards -b esp32_C3_4MB
+idf.py build
+idf.py -p <port> flash monitor
+```
+
+On first boot, join the setup hotspot shown in the serial log and open [device settings](http://192.168.4.1/). Enter the Wi-Fi, OpenAI-compatible model, and QQ bot settings, then save and restart.
+
+This profile keeps QQ text chat, session history, lightweight memory, and web settings. It uses a single 2.75 MiB app partition and 768 KiB of writable storage. Images and files, web chat, other IM channels, MCP, skills, and scripts require a full build.
+
+For a firmware update on the same partition layout, use `idf.py -p <port> app-flash` to keep settings and chat records. On the next message, the model receives the available history with speaker labels and is instructed to retrieve values the user supplied from their original messages.

@@ -155,6 +155,13 @@ static esp_err_t build_agent_out_message_event(const claw_core_request_t *reques
         strlcpy(out_event->correlation_id,
                 request->source_message_id,
                 sizeof(out_event->correlation_id));
+#if CONFIG_APP_CLAW_TEXT_ONLY
+        if (request->source_channel && strcmp(request->source_channel, "qq") == 0 &&
+                strcmp(out_event->source_channel, "qq") == 0 && request->source_chat_id &&
+                strcmp(out_event->chat_id, request->source_chat_id) == 0) {
+            out_event->reply_to_message_id = (char *)request->source_message_id;
+        }
+#endif
     } else {
         snprintf(out_event->correlation_id, sizeof(out_event->correlation_id),
                  "%" PRIu32,

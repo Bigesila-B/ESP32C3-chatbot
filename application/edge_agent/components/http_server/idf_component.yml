@@ -2,6 +2,8 @@ dependencies:
   espressif/cjson:
     version: "^1.7.19"
   cap_im_local:
+    rules:
+      - if: $CONFIG{APP_CLAW_TEXT_ONLY} != True
     path: ../../../../components/claw_capabilities/cap_im_local
 
   cap_mcp_client:

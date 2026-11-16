@@ -1789,6 +1789,11 @@ static esp_err_t claw_event_router_execute_agent_action(
     agent_input.source_chat_id = event->chat_id;
     agent_input.source_sender_id = event->sender_id;
     agent_input.source_message_id = event->message_id;
+#if CONFIG_APP_CLAW_TEXT_ONLY
+    if (event->reply_to_message_id) {
+        agent_input.source_message_id = event->reply_to_message_id;
+    }
+#endif
     agent_input.event_id = event->event_id;
     agent_input.target_channel = (target_channel && target_channel[0]) ? target_channel : event->source_channel;
     agent_input.target_chat_id = (target_chat_id && target_chat_id[0]) ? target_chat_id : event->chat_id;
@@ -1853,6 +1858,10 @@ static esp_err_t claw_event_router_send_text(const claw_event_t *event,
         .target_channel = channel,
         .target_chat_id = chat_id,
         .source_cap = "claw_event_router",
+#if CONFIG_APP_CLAW_TEXT_ONLY
+        .correlation_id = strcmp(channel, event->source_channel) == 0 && strcmp(chat_id, event->chat_id) == 0
+                          ? event->reply_to_message_id : NULL,
+#endif
         .caller = CLAW_CAP_CALLER_SYSTEM,
     };
     err = claw_cap_call(cap_name, payload, &ctx, output, output_size);
@@ -2592,6 +2601,11 @@ esp_err_t claw_event_router_publish_message(const char *source_cap,
     if (message_id) {
         strlcpy(event.message_id, message_id, sizeof(event.message_id));
         strlcpy(event.correlation_id, message_id, sizeof(event.correlation_id));
+#if CONFIG_APP_CLAW_TEXT_ONLY
+        if (strcmp(channel, "qq") == 0) {
+            event.reply_to_message_id = (char *)message_id;
+        }
+#endif
     }
     event.timestamp_ms = claw_event_router_now_ms();
     event.session_policy = CLAW_SESSION_POLICY_CHAT;

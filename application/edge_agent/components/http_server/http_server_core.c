@@ -55,12 +55,14 @@ esp_err_t http_server_init(const http_server_config_t *config)
     return ESP_OK;
 }
 
+#if !CONFIG_APP_CLAW_TEXT_ONLY
 static void http_server_close_fn(httpd_handle_t hd, int sockfd)
 {
     (void)hd;
     http_server_webim_ws_fd_remove(sockfd);
     close(sockfd);
 }
+#endif
 
 esp_err_t http_server_start(void)
 {
@@ -71,9 +73,15 @@ esp_err_t http_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.ctrl_port = HTTP_SERVER_CTRL_PORT;
-    config.max_uri_handlers = 32;
     config.stack_size = 8192;
+#if CONFIG_APP_CLAW_TEXT_ONLY
+    config.max_uri_handlers = 8;
+    config.max_open_sockets = 4;
+#else
+    config.max_uri_handlers = 32;
     config.max_open_sockets = 12;
+    config.close_fn = http_server_close_fn;
+#endif
     config.lru_purge_enable = true;
 
     uint32_t task_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
@@ -84,26 +92,27 @@ esp_err_t http_server_start(void)
 #endif
     config.task_caps = task_caps;
 
-    config.close_fn = http_server_close_fn;
     config.uri_match_fn = httpd_uri_match_wildcard;
 
     ESP_RETURN_ON_ERROR(httpd_start(&s_ctx.server, &config), TAG, "Failed to start HTTP server");
     ESP_RETURN_ON_ERROR(http_server_register_assets_routes(s_ctx.server), TAG, "Failed to register assets routes");
+    ESP_RETURN_ON_ERROR(http_server_register_config_routes(s_ctx.server), TAG, "Failed to register config routes");
+    ESP_RETURN_ON_ERROR(http_server_register_status_routes(s_ctx.server), TAG, "Failed to register status routes");
+#if !CONFIG_APP_CLAW_TEXT_ONLY
     ESP_RETURN_ON_ERROR(http_server_register_capabilities_routes(s_ctx.server), TAG, "Failed to register capability routes");
     ESP_RETURN_ON_ERROR(http_server_register_lua_modules_routes(s_ctx.server), TAG, "Failed to register Lua module routes");
-    ESP_RETURN_ON_ERROR(http_server_register_config_routes(s_ctx.server), TAG, "Failed to register config routes");
 #if CONFIG_APP_CLAW_CAP_MCP_CLIENT
     ESP_RETURN_ON_ERROR(http_server_register_mcp_routes(s_ctx.server), TAG, "Failed to register MCP routes");
 #endif
-    ESP_RETURN_ON_ERROR(http_server_register_status_routes(s_ctx.server), TAG, "Failed to register status routes");
     ESP_RETURN_ON_ERROR(http_server_register_chat_help_routes(s_ctx.server), TAG, "Failed to register chat help routes");
     ESP_RETURN_ON_ERROR(http_server_register_skill_catalog_routes(s_ctx.server), TAG, "Failed to register skill catalog routes");
     ESP_RETURN_ON_ERROR(http_server_register_files_routes(s_ctx.server), TAG, "Failed to register files routes");
-#if CONFIG_APP_CLAW_LUA_MODULE_HTTP_SERVER
+#if CONFIG_APP_CLAW_CAP_LUA && CONFIG_APP_CLAW_LUA_MODULE_HTTP_SERVER
     ESP_RETURN_ON_ERROR(http_server_register_lua_app_routes(s_ctx.server), TAG, "Failed to register Lua app routes");
 #endif
     ESP_RETURN_ON_ERROR(http_server_register_wechat_routes(s_ctx.server), TAG, "Failed to register WeChat routes");
     ESP_RETURN_ON_ERROR(http_server_register_webim_routes(s_ctx.server), TAG, "Failed to register Web IM routes");
+#endif
     ESP_RETURN_ON_ERROR(httpd_register_err_handler(s_ctx.server, HTTPD_404_NOT_FOUND, http_server_captive_404_handler),
                         TAG, "Failed to register captive 404 handler");
 

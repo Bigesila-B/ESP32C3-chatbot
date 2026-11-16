@@ -552,7 +552,9 @@ static void claw_agent_mgr_fill_core_config(claw_agent_mgr_agent_t *agent,
 static esp_err_t claw_agent_mgr_start_agent_core(claw_agent_mgr_agent_t *agent)
 {
     claw_core_config_t core_config = {0};
+#if !CONFIG_APP_CLAW_TEXT_ONLY
     claw_core_context_provider_t cap_tools_provider = {0};
+#endif
     char *agent_system_prompt = NULL;
     esp_err_t ret;
 
@@ -592,12 +594,14 @@ static esp_err_t claw_agent_mgr_start_agent_core(claw_agent_mgr_agent_t *agent)
         ESP_GOTO_ON_ERROR(claw_core_add_context_provider(agent->core, &s_mgr.base_providers[i]),
                           fail, TAG, "add base context provider");
     }
+#if !CONFIG_APP_CLAW_TEXT_ONLY
     cap_tools_provider = agent->role == CLAW_AGENT_MGR_ROLE_ROOT ?
                          claw_cap_root_agent_tools_provider :
                          claw_cap_sub_agent_tools_provider;
     cap_tools_provider.user_ctx = &agent->cap_user_ctx;
     ESP_GOTO_ON_ERROR(claw_core_add_context_provider(agent->core, &cap_tools_provider),
                       fail, TAG, "add cap tools provider");
+#endif
     if (agent->role == CLAW_AGENT_MGR_ROLE_SUBAGENT) {
         ESP_GOTO_ON_ERROR(claw_core_add_completion_observer(agent->core,
                                                             claw_agent_mgr_completion_observer,

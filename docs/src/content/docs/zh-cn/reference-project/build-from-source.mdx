@@ -88,3 +88,19 @@ import LinkToSource from '@/components/LinkToSource.astro';
    idf.py flash monitor
    ```
 </Steps>
+
+## ESP32-C3 4 MB 精简版
+
+在单独的源码目录中构建 C3 固件，保留已有 S3 构建目录。进入 `application/edge_agent` 后执行以下命令，把 `<port>` 换成 C3 的串口。
+
+```bash
+idf.py bmgr -c ./boards -b esp32_C3_4MB
+idf.py build
+idf.py -p <port> flash monitor
+```
+
+首次启动后连接串口日志中显示的配网热点，打开 [设备设置](http://192.168.4.1/)，填写 Wi-Fi、OpenAI 兼容模型和 QQ 机器人配置，保存并重启。
+
+这个配置保留 QQ 文字聊天、会话历史、轻量记忆和网页设置，占用一个 2.75 MiB 应用分区和 768 KiB 可写存储。图像和文件、Web 聊天、其他 IM 通道、MCP、技能与脚本需要使用完整版。
+
+更新采用相同分区布局的固件时，用 `idf.py -p <port> app-flash` 保留设置和聊天记录。下次聊天时，模型会收到附带发言者标签的可用历史，并优先从用户原话里找回用户给过的内容。

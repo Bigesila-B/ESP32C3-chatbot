@@ -48,9 +48,14 @@ typedef struct {
 #define APP_DEFAULT_LLM_BASE_URL             ""
 #define APP_DEFAULT_LLM_AUTH_TYPE            ""
 #define APP_DEFAULT_LLM_TIMEOUT_MS           "120000"
+#if CONFIG_APP_CLAW_TEXT_ONLY
+#define APP_DEFAULT_LLM_MAX_TOKENS           "512"
+#define APP_DEFAULT_LLM_CONTEXT_WINDOW       "4096"
+#else
 #define APP_DEFAULT_LLM_MAX_TOKENS           "8192"
-/* 0 表示按模型名自动匹配上下文窗口大小 */
 #define APP_DEFAULT_LLM_CONTEXT_WINDOW       "0"
+#endif
+/* 0 表示按模型名自动匹配上下文窗口大小 */
 #define APP_DEFAULT_LLM_DEFAULT_IMAGE_MAX_BYTES "524288"
 #define APP_DEFAULT_LLM_MAX_TOKENS_FIELD     ""
 #define APP_DEFAULT_LLM_SUPPORTS_TOOLS       "false"

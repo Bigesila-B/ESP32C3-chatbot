@@ -1,0 +1,28 @@
+[
+  {
+    "id": "im_session_command",
+    "description": "管理本地聊天会话",
+    "consume_on_match": true,
+    "match": {
+      "channel": "qq",
+      "event_type": "message",
+      "event_key": "text",
+      "content_type": "text",
+      "text": "/session",
+      "text_match_rule": "prefix"
+    },
+    "actions": [
+      { "type": "call_cap", "cap": "session_command", "input": { "command": "{{match.remainder}}" } },
+      { "type": "send_message", "input": {} }
+    ]
+  },
+  {
+    "id": "agent_out_message_send_message",
+    "description": "把最终回复发回 QQ",
+    "consume_on_match": true,
+    "match": { "source_cap": "claw_core", "event_type": "out_message", "content_type": "text" },
+    "actions": [
+      { "type": "send_message", "input": { "message": "{{event.text}}" } }
+    ]
+  }
+]

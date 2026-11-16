@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP-Claw C3 设置</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f2f6f4; color: #172b26; font: 16px/1.5 system-ui, sans-serif; }
+  main { width: min(100% - 2rem, 36rem); margin: 2rem auto; }
+  h1 { margin: 0; font-size: 1.8rem; }
+  p { margin: .5rem 0 1.25rem; }
+  fieldset { margin: 0 0 1rem; border: 1px solid #b9cec6; border-radius: .75rem; padding: 1rem; background: #fff; }
+  legend { padding: 0 .4rem; font-weight: 650; }
+  label { display: block; margin: 0 0 .75rem; }
+  label:last-child { margin-bottom: 0; }
+  input { display: block; width: 100%; margin-top: .25rem; padding: .55rem .65rem; font: inherit; border: 1px solid #9ab5aa; border-radius: .35rem; }
+  :focus-visible { outline: 2px solid #0e775e; outline-offset: 2px; }
+  button { border: 1px solid #135e4c; border-radius: .4rem; background: #135e4c; color: white; padding: .55rem 1rem; font: inherit; cursor: pointer; }
+  button[type=button] { background: white; color: #135e4c; }
+  button:disabled, fieldset:disabled { opacity: .55; cursor: default; }
+  #message { min-height: 1.5em; }
+</style>
+<main>
+  <h1>ESP-Claw C3 设置</h1>
+  <p id="network">正在读取网络状态…</p>
+  <form id="settings" autocomplete="off">
+    <fieldset disabled>
+      <legend>Wi-Fi</legend>
+      <label>网络名称 <input name="wifi_ssid" maxlength="32" required></label>
+      <label>Wi-Fi 密码 <input name="wifi_password" type="password" maxlength="63"></label>
+    </fieldset>
+    <fieldset disabled>
+      <legend>对话模型</legend>
+      <label>OpenAI 兼容 API 地址 <input name="llm_base_url" type="url" placeholder="https://api.example.com/v1" maxlength="319"></label>
+      <label>模型名称 <input name="llm_model" maxlength="63"></label>
+      <label>API 密钥 <input name="llm_api_key" type="password" maxlength="319"></label>
+    </fieldset>
+    <fieldset disabled>
+      <legend>QQ 机器人</legend>
+      <label>App ID <input name="qq_app_id" maxlength="31"></label>
+      <label>App Secret <input name="qq_app_secret" type="password" maxlength="319"></label>
+    </fieldset>
+    <button id="save" disabled>保存设置</button>
+    <button id="restart" type="button" disabled>重启设备</button>
+  </form>
+  <p id="message" role="status"></p>
+</main>
+<script>
+  const form = document.querySelector('#settings');
+  const fields = [...form.querySelectorAll('input')];
+  const save = document.querySelector('#save');
+  const restart = document.querySelector('#restart');
+  const network = document.querySelector('#network');
+  const message = document.querySelector('#message');
+
+  async function api(path, body) {
+    const response = await fetch(path, body === undefined ? {cache: 'no-store'} : {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+    });
+    if (!response.ok) throw new Error(await response.text());
+    return response.json();
+  }
+
+  async function load() {
+    try {
+      const status = await api('/api/status');
+      network.textContent = status.wifi_connected ? '已联网 · ' + status.ip : '配网热点 · ' + status.ap_ssid;
+    } catch {
+      network.textContent = '暂时无法读取网络状态';
+    }
+    try {
+      const config = await api('/api/config?fields=' + fields.map(field => field.name).join(','));
+      for (const field of fields) field.value = config[field.name] ?? '';
+      for (const group of form.querySelectorAll('fieldset')) group.disabled = false;
+      save.disabled = restart.disabled = false;
+    } catch {
+      message.textContent = '无法读取设置，请刷新页面重试。';
+    }
+  }
+
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    save.disabled = restart.disabled = true;
+    try {
+      const config = Object.fromEntries(new FormData(form));
+      config.llm_backend_type = 'openai_compatible';
+      await api('/api/config', config);
+      message.textContent = '设置已保存，重启设备后生效。';
+    } catch (error) {
+      message.textContent = '保存失败 · ' + error.message;
+    } finally {
+      save.disabled = restart.disabled = false;
+    }
+  });
+
+  restart.addEventListener('click', async () => {
+    save.disabled = restart.disabled = true;
+    try {
+      await api('/api/restart', {});
+      message.textContent = '设备正在重启，请稍后重新连接。';
+    } catch {
+      message.textContent = '重启请求失败，请重试。';
+      save.disabled = restart.disabled = false;
+    }
+  });
+
+  load();
+</script>
+</html>

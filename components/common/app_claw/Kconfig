@@ -1,7 +1,14 @@
 menu "App Claw Config"
 
+    config APP_CLAW_TEXT_ONLY
+        bool "Build a text-only edge agent"
+        default n
+        help
+            Omit QQ attachments and use the smaller settings page.
+
     config APP_CLAW_ENABLE_CLI
         bool "Enable App Claw CLI"
+        depends on !APP_CLAW_TEXT_ONLY
         default y
         help
             Enable the console REPL managed by app_claw. When disabled, app_claw

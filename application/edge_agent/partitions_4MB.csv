@@ -1,0 +1,6 @@
+# Name,    Type, SubType, Offset,   Size
+nvs,       data, nvs,     0xa000,   24K
+phy_init,  data, phy,     0x10000,  4K
+factory,   app,  factory, 0x20000,  2816K
+system,    data, fat,     ,        384K
+storage,   data, fat,     ,        768K

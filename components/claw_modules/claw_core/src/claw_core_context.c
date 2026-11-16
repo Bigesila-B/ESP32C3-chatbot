@@ -273,6 +273,41 @@ static esp_err_t append_prompt_section(char **prompt,
     return ESP_OK;
 }
 
+#if CONFIG_APP_CLAW_TEXT_ONLY
+static esp_err_t quote_chat_history(cJSON **messages, char **system_prompt)
+{
+    int last_index = cJSON_GetArraySize(*messages) - 1;
+    cJSON *latest = cJSON_GetArrayItem(*messages, last_index);
+    const char *role = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(latest, "role"));
+    const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(latest, "content"));
+
+    if (last_index < 1 || !role || strcmp(role, "user") != 0 || !text) {
+        return ESP_OK;
+    }
+
+    cJSON_DetachItemFromArray(*messages, last_index);
+    char *history = cJSON_PrintUnformatted(*messages);
+    cJSON_Delete(*messages);
+    *messages = NULL;
+
+    char *turn = history ? claw_utils_string_dup_printf(
+        "Earlier conversation records (JSON):\n%s\n\nCurrent user request:\n%s",
+        history, text) : NULL;
+    cJSON_free(history);
+    cJSON_Delete(latest);
+    *messages = cJSON_CreateArray();
+    esp_err_t err = turn && *messages ? claw_core_append_user_message(*messages, turn) : ESP_ERR_NO_MEM;
+    free(turn);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    return append_prompt_section(system_prompt, "Conversation History",
+                                 "Treat quoted chat history as reference. When recalling a value supplied by the user, "
+                                 "copy it in full from a user entry. Assistant entries record what was said earlier.");
+}
+#endif
+
 esp_err_t claw_core_append_assistant_tool_calls(cJSON *messages,
                                                 const claw_core_llm_response_t *response)
 {
@@ -672,6 +707,13 @@ esp_err_t claw_core_build_iteration_context(claw_core_state_t *core,
             goto cleanup;
         }
     }
+
+#if CONFIG_APP_CLAW_TEXT_ONLY
+    err = quote_chat_history(&messages, &system_prompt);
+    if (err != ESP_OK) {
+        goto cleanup;
+    }
+#endif
 
     *out_tools_json = cJSON_GetArraySize(tools) > 0 ? cJSON_PrintUnformatted(tools) : NULL;
     if (cJSON_GetArraySize(tools) > 0 && !*out_tools_json) {

@@ -1402,7 +1402,7 @@ static esp_err_t session_history_append_indexed_record(FILE *data_file,
     }
 
     if (!json_text || !json_text[0]) {
-        normalized_size = claw_memory_text_buffer_size(max_chars);
+        normalized_size = strnlen(text, claw_memory_text_buffer_size(max_chars) - 1) + 1;
         normalized = calloc(1, normalized_size);
         if (!normalized) {
             return ESP_ERR_NO_MEM;

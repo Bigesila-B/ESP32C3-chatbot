@@ -444,13 +444,16 @@ static esp_err_t app_cap_register_im_qq(const app_claw_config_t *config,
                         TAG,
                         "Failed to register QQ group");
 
+#if CONFIG_APP_CLAW_TEXT_ONLY
+    (void)paths;
+#else
     ESP_RETURN_ON_ERROR(cap_im_qq_set_attachment_config(&(cap_im_qq_attachment_config_t) {
                             .storage_root_dir = paths->im_attachment_root,
                             .max_inbound_file_bytes = APP_IM_ATTACHMENT_MAX_BYTES,
                             .enable_inbound_attachments = true,
                         }),
                         TAG, "Failed to set QQ attachment config");
-
+#endif
     if (config->qq_app_id[0] && config->qq_app_secret[0]) {
         ESP_RETURN_ON_ERROR(cap_im_qq_set_credentials(config->qq_app_id, config->qq_app_secret),
                             TAG, "Failed to set QQ credentials");

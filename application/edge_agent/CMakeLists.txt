@@ -42,25 +42,36 @@ if(EXISTS "${EDGE_AGENT_BOARD_GENERATED_CMAKELISTS}")
     endif()
 endif()
 
+set(EDGE_AGENT_FATFS_SYSTEM_COPY_COMMANDS
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${EDGE_AGENT_FATFS_SYSTEM_SOURCE_ROOT}"
+            "${EDGE_AGENT_FATFS_SYSTEM_BUILD_ROOT}"
+)
+if(CONFIG_APP_CLAW_TEXT_ONLY)
+    set(EDGE_AGENT_FATFS_SYSTEM_COPY_COMMANDS
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${EDGE_AGENT_FATFS_SYSTEM_SOURCE_ROOT}/.recovery/memory"
+                "${EDGE_AGENT_FATFS_SYSTEM_BUILD_ROOT}/.recovery/memory"
+    )
+else()
+    list(APPEND EDGE_AGENT_FATFS_STORAGE_COPY_COMMANDS
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${EDGE_AGENT_FATFS_SOURCE_ROOT}"
+                "${EDGE_AGENT_FATFS_BUILD_ROOT}"
+    )
+endif()
+
 add_custom_target(edge_agent_prepare_fatfs_image ALL
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${EDGE_AGENT_FATFS_BUILD_ROOT}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${EDGE_AGENT_FATFS_BUILD_ROOT}"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${EDGE_AGENT_FATFS_SOURCE_ROOT}"
-            "${EDGE_AGENT_FATFS_BUILD_ROOT}"
     ${EDGE_AGENT_FATFS_STORAGE_COPY_COMMANDS}
     VERBATIM
 )
 
-# Prepare the read-only system partition build tree: mirror the source
-# system_fs_image/ into a build-side staging dir that skill/lua syncs
-# can also write into before fatfsgen packs it.
 add_custom_target(edge_agent_prepare_system_fs_image ALL
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${EDGE_AGENT_FATFS_SYSTEM_BUILD_ROOT}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${EDGE_AGENT_FATFS_SYSTEM_BUILD_ROOT}"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${EDGE_AGENT_FATFS_SYSTEM_SOURCE_ROOT}"
-            "${EDGE_AGENT_FATFS_SYSTEM_BUILD_ROOT}"
+    ${EDGE_AGENT_FATFS_SYSTEM_COPY_COMMANDS}
     ${EDGE_AGENT_BOARD_FATFS_SYSTEM_COPY_COMMANDS}
     VERBATIM
 )
@@ -70,19 +81,21 @@ fatfs_create_spiflash_image(storage "${EDGE_AGENT_FATFS_BUILD_ROOT}" FLASH_IN_PR
 
 # Skill / Lua resources are now baked into the read-only system partition
 # so storage can be reformatted at runtime without losing them.
-skill_builder_configure_skill_sync(
+if(NOT CONFIG_APP_CLAW_TEXT_ONLY)
+  skill_builder_configure_skill_sync(
     TARGET fatfs_system_bin
     SKILL_OUTPUT_DIR "${EDGE_AGENT_FATFS_SYSTEM_BUILD_ROOT}/skills"
 )
 
-lua_module_builder_configure_builtin_lua_sync(
+  lua_module_builder_configure_builtin_lua_sync(
     TARGET fatfs_system_bin
     BUILTIN_OUTPUT_DIR "${EDGE_AGENT_FATFS_SYSTEM_BUILD_ROOT}/scripts/builtin"
     DOCS_OUTPUT_DIR "${EDGE_AGENT_FATFS_SYSTEM_BUILD_ROOT}/scripts/docs"
 )
 
-add_dependencies(skill_builder_sync_skills edge_agent_prepare_system_fs_image)
-add_dependencies(lua_module_builder_sync_builtin_scripts edge_agent_prepare_system_fs_image)
-add_dependencies(lua_module_builder_sync_docs edge_agent_prepare_system_fs_image)
+  add_dependencies(skill_builder_sync_skills edge_agent_prepare_system_fs_image)
+  add_dependencies(lua_module_builder_sync_builtin_scripts edge_agent_prepare_system_fs_image)
+  add_dependencies(lua_module_builder_sync_docs edge_agent_prepare_system_fs_image)
+endif()
 add_dependencies(fatfs_system_bin edge_agent_prepare_system_fs_image)
 add_dependencies(fatfs_storage_bin edge_agent_prepare_fatfs_image)

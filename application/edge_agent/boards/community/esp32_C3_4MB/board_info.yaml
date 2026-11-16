@@ -1,0 +1,5 @@
+board: esp32_C3_4MB
+chip: esp32c3
+version: 1.0.0
+description: "ESP32-C3 with 4 MB flash for text chat"
+manufacturer: "Community"
