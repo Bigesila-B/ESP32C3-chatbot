@@ -2,15 +2,9 @@ set(FRONTEND_SOURCE_DIR        "${CMAKE_CURRENT_LIST_DIR}/frontend_source")
 set(FRONTEND_DIST_HTML_GZ      "${FRONTEND_SOURCE_DIR}/dist/index.html.gz")
 set(FRONTEND_PUBLIC_FAVICON_ICO  "${FRONTEND_SOURCE_DIR}/public/favicon.ico")
 
-if(NOT CONFIG_APP_CLAW_TEXT_ONLY AND NOT EXISTS "${FRONTEND_DIST_HTML_GZ}")
-    message(FATAL_ERROR
-        "\n"
-        "Frontend bundle not found: ${FRONTEND_DIST_HTML_GZ}\n"
-        "Build the SolidJS UI before running idf.py build, e.g.:\n"
-        "    cd ${FRONTEND_SOURCE_DIR}\n"
-        "    pnpm install --frozen-lockfile\n"
-        "    pnpm run build\n")
-endif()
+# 本项目只面向 ESP32-C3 精简版，前端固定使用 frontend_text/index.html。
+# 原先这里有一段「React 产物缺失就 FATAL_ERROR」的检查，但组件 CMakeLists 在
+# 配置阶段会先以空 CONFIG_ 执行一遍，导致精简构建被误判并中断，因此移除。
 
 set(http_server_srcs
     "http_server_core.c"
