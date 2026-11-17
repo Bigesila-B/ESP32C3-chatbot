@@ -17,6 +17,9 @@
 * **人格编辑**：人格统一写在 `/memory/soul.md`，网页里单个 Markdown 文本框编辑。`app_claw_build_system_prompt()` 在每次请求前直接读该文件拼进系统提示，保存后下一次对话即生效，不需要重启。
 * **长期记忆编辑**：`GET/POST/PUT/DELETE /api/memory` 对应条目的增删改查；新增 `POST /api/memory/bulk` 支持整块文本按行替换，返回 `kept/added/removed`；新增 `/api/memory/doc` 读写 `soul.md`、`identity.md`、`user.md`（白名单 + 8 KB 上限）。手动写入的条目 `source` 标记为 `manual`。
 * **IM 通道扩展**：除 QQ 外，编译期同时打开 Telegram、飞书、微信三个通道，填好凭证重启即可启用。
+* **联网搜索**：移植 `cap_web_search`（Tavily 优先、Brave 备选），模型通过 `web_search` 工具自主发起查询；后台可填两家 API Key，未配置密钥时不注册该工具。为适配 C3 的堆，结果数降到 3 条、正文按 UTF-8 边界截成短摘要。
+* **聊天记录侧边栏**：对话页左侧列出设备上的历史会话，支持新建、切换、删除；新增 `GET /api/sessions`、`GET/DELETE /api/session`，`/api/chat` 增加可选 `session` 参数（默认 `web`）。会话 id 由文件名反解，不重复实现哈希。
+* **工具调用开关**：模型设置页新增「工具调用」下拉并默认开启；搜索能力依赖它。
 
 ### Fix
 
@@ -25,3 +28,7 @@
 * `TEXT_ONLY` 构建下关闭飞书、Telegram、微信的附件入站，避免 768 KB 的 storage 被图片写满。
 * `http_server` 组件补充 `claw_memory` 的 path 依赖声明，修复头文件搜索路径不通。
 * `main/idf_component.yml` 显式声明 `esp_websocket_client`，避免被判为未使用而触发批量删除。
+* 上游在 `TEXT_ONLY` 构建里同时排除了「工具清单 provider」和 `supports_tools` 声明，导致模型拿不到任何工具；两处限制已解除，联网搜索才真正可用。
+* 撤销上一轮的人格直读补丁：`claw_memory_profile_provider` 原本就会注入 `soul.md`，重复注入使每个请求多背 1.8 KB，开启工具后直接 OOM。
+* `claw_cap` 每次工具调用申请的 32 KB 输出缓冲降为 8 KB；`restart_device` 改为模型不可调用，重启只保留网页 `/api/restart` 这条人工通道。
+* `http_server` 的 `max_uri_handlers` 从 20 保持不变（会话接口占 3 个槽位，现共 17 条路由）。

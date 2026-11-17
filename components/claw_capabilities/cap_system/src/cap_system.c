@@ -944,7 +944,9 @@ static const claw_cap_descriptor_t s_system_descriptors[] = {
         .family = "system",
         .description = "Schedule a device restart after an optional delay in milliseconds.",
         .kind = CLAW_CAP_KIND_CALLABLE,
-        .cap_flags = CLAW_CAP_FLAG_CALLABLE_BY_LLM,
+        /* 不开放给模型：重启属于设备管理动作，只保留网页 /api/restart 这条人工通道。
+         * 置 0 后该工具不会出现在模型的工具清单里，也无法被调用。 */
+        .cap_flags = 0,
         .input_schema_json = "{\"type\":\"object\",\"properties\":{\"delay_ms\":{\"type\":\"integer\",\"minimum\":0}}}",
         .execute = cap_system_execute_restart,
     },

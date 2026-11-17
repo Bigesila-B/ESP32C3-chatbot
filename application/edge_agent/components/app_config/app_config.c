@@ -58,7 +58,8 @@ typedef struct {
 /* 0 表示按模型名自动匹配上下文窗口大小 */
 #define APP_DEFAULT_LLM_DEFAULT_IMAGE_MAX_BYTES "524288"
 #define APP_DEFAULT_LLM_MAX_TOKENS_FIELD     ""
-#define APP_DEFAULT_LLM_SUPPORTS_TOOLS       "false"
+/* 固件自带联网搜索等工具，默认让模型使用工具调用；接口不支持时可关掉 */
+#define APP_DEFAULT_LLM_SUPPORTS_TOOLS       "true"
 #define APP_DEFAULT_LLM_SUPPORTS_VISION      "false"
 #define APP_DEFAULT_LLM_IMAGE_REMOTE_URL_ONLY "false"
 #define APP_DEFAULT_QQ_APP_ID                ""

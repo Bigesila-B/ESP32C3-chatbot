@@ -56,6 +56,7 @@ esp_err_t http_server_register_status_routes(httpd_handle_t server);
 esp_err_t http_server_register_memory_routes(httpd_handle_t server);
 #endif
 esp_err_t http_server_register_chat_routes(httpd_handle_t server);
+esp_err_t http_server_register_session_routes(httpd_handle_t server);
 esp_err_t http_server_register_chat_help_routes(httpd_handle_t server);
 esp_err_t http_server_register_skill_catalog_routes(httpd_handle_t server);
 esp_err_t http_server_register_files_routes(httpd_handle_t server);

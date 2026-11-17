@@ -75,7 +75,7 @@ esp_err_t http_server_start(void)
     config.ctrl_port = HTTP_SERVER_CTRL_PORT;
     config.stack_size = 8192;
 #if CONFIG_APP_CLAW_TEXT_ONLY
-    /* 首页 2 + 配置 2 + 状态 2 + 记忆 4 + 文档读写 2 + 批量 1 + 聊天 1 = 14，留足余量。
+    /* 首页 2 + 配置 2 + 状态 2 + 记忆 4 + 文档读写 2 + 批量 1 + 聊天 1 + 会话 3 = 17，留足余量。
      * 槽位不足会让 httpd_register_uri_handler 返回 HANDLERS_FULL，
      * 经 ESP_RETURN_ON_ERROR 冒泡到 main 的 ESP_ERROR_CHECK 后直接 abort。 */
     config.max_uri_handlers = 20;
@@ -106,6 +106,7 @@ esp_err_t http_server_start(void)
     ESP_RETURN_ON_ERROR(http_server_register_memory_routes(s_ctx.server), TAG, "Failed to register memory routes");
 #endif
     ESP_RETURN_ON_ERROR(http_server_register_chat_routes(s_ctx.server), TAG, "Failed to register chat routes");
+    ESP_RETURN_ON_ERROR(http_server_register_session_routes(s_ctx.server), TAG, "Failed to register session routes");
 #if !CONFIG_APP_CLAW_TEXT_ONLY
     ESP_RETURN_ON_ERROR(http_server_register_capabilities_routes(s_ctx.server), TAG, "Failed to register capability routes");
     ESP_RETURN_ON_ERROR(http_server_register_lua_modules_routes(s_ctx.server), TAG, "Failed to register Lua module routes");

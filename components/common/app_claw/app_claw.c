@@ -617,51 +617,15 @@ static esp_err_t app_claw_publish_startup_event(void)
 #endif
 
 #if CONFIG_APP_CLAW_CAP_CORE
-/* 人格注入：直接读取 DATA 根下的 memory/soul.md。
- * 比依赖 context provider 更直观 —— 网页改完文件，下一次对话立即生效。
- * claw_core 每次请求都会 dup system_prompt，因此缓冲必须是长期有效的静态存储。 */
-#define APP_PERSONA_PROMPT_BUF_SIZE 4096
-#define APP_PERSONA_FILE_MAX        1800
-
-static char s_persona_prompt[APP_PERSONA_PROMPT_BUF_SIZE];
-
+/* 人格与档案（soul.md / user.md / identity.md）由 claw_memory_profile_provider
+ * 在每次请求时读取文件后注入 system prompt，改完下一次对话就生效。
+ *
+ * 这里曾经为了排查"人格不生效"重复读过一次 soul.md，导致同一份人格在上下文里
+ * 出现两遍。C3 没有 PSRAM，每个请求多背 1.8 KB 直接把堆压到了临界点，
+ * 开启工具调用后立刻 OOM，因此改回单一注入源。 */
 static const char *app_claw_build_system_prompt(void)
 {
-    char path[96];
-    if (claw_paths_join(CLAW_PATH_DATA, "memory/soul.md", path, sizeof(path)) != ESP_OK) {
-        return APP_SYSTEM_PROMPT;
-    }
-
-    FILE *fp = fopen(path, "rb");
-    if (!fp) {
-        return APP_SYSTEM_PROMPT;
-    }
-
-    /* 从系统提示末尾开始写人格正文，省掉一次大缓冲拷贝 */
-    size_t base = strlen(APP_SYSTEM_PROMPT);
-    if (base + 24 >= sizeof(s_persona_prompt)) {
-        fclose(fp);
-        return APP_SYSTEM_PROMPT;
-    }
-    memcpy(s_persona_prompt, APP_SYSTEM_PROMPT, base);
-    memcpy(s_persona_prompt + base, "\n\n## Persona\n", 14);
-    size_t off = base + 14;
-
-    size_t room = sizeof(s_persona_prompt) - off - 1;
-    if (room > APP_PERSONA_FILE_MAX) {
-        room = APP_PERSONA_FILE_MAX;
-    }
-    size_t n = fread(s_persona_prompt + off, 1, room, fp);
-    fclose(fp);
-
-    if (n == 0) {
-        return APP_SYSTEM_PROMPT;
-    }
-    off += n;
-    s_persona_prompt[off] = '\0';
-
-    ESP_LOGD(TAG, "persona injected from soul.md: %u bytes", (unsigned)n);
-    return s_persona_prompt;
+    return APP_SYSTEM_PROMPT;
 }
 
 static void app_claw_fill_core_config(const app_claw_config_t *config,
@@ -678,8 +642,10 @@ static void app_claw_fill_core_config(const app_claw_config_t *config,
     core_config->timeout_ms = (uint32_t)strtoul(config->llm_timeout_ms, NULL, 10);
     core_config->max_tokens = (uint32_t)strtoul(config->llm_max_tokens, NULL, 10);
     core_config->image_max_bytes = (size_t)strtoul(config->llm_default_image_max_bytes, NULL, 10);
-#if !CONFIG_APP_CLAW_TEXT_ONLY
+    /* 精简构建同样会下发工具（联网搜索），所以按配置声明工具支持；
+     * 视觉仍保持关闭：TEXT_ONLY 没有图像处理链路。 */
     core_config->supports_tools = app_claw_bool_is_true(config->llm_supports_tools);
+#if !CONFIG_APP_CLAW_TEXT_ONLY
     core_config->supports_vision = app_claw_bool_is_true(config->llm_supports_vision);
 #endif
     core_config->image_remote_url_only = app_claw_bool_is_true(config->llm_image_remote_url_only);

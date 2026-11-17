@@ -27,7 +27,11 @@ static const char *TAG = "claw_cap";
 #define CLAW_CAP_TOOL_DESCRIPTION_MAX 256
 
 #ifndef CLAW_CAP_CORE_OUTPUT_SIZE
-#define CLAW_CAP_CORE_OUTPUT_SIZE (32 * 1024)
+/* 每次工具调用都会先按这个尺寸申请一整块输出缓冲。
+ * 上游默认 32 KB 面向带 PSRAM 的 S3；C3 上它会与 LLM 请求体、搜索响应、
+ * TLS 缓冲同时存在，直接把堆挤爆（表现为 "Out of memory serializing request"）。
+ * 本项目只暴露 3 个轻量工具，8 KB 足够，仍可用编译选项覆盖。 */
+#define CLAW_CAP_CORE_OUTPUT_SIZE (8 * 1024)
 #endif
 
 typedef struct {

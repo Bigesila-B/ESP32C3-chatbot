@@ -84,6 +84,11 @@ python -m esptool --port COM6 --baud 460800 write-flash 0x0 backup.bin
 | 启动即 abort，日志里有 `ESP_ERR_HTTPD_HANDLERS_FULL` | `max_uri_handlers` 小于实际注册的路由数 | 改 `http_server_core.c` 里的槽位数，目前 TEXT_ONLY 分支为 20 |
 | `esp_console.h: No such file` | `CONFIG_APP_CLAW_TEXT_ONLY=y` 时没有 console 组件 | `cap_im_platform/CMakeLists.txt` 里用 `if(NOT CONFIG_APP_CLAW_TEXT_ONLY)` 排除 `cmd_cap_im_*.c` |
 | 组件被判 unused，触发批量删除 | 组件管理器认为依赖未使用 | 在 `main/idf_component.yml` 里显式声明该依赖 |
+| `Cannot establish a connection to the component registry` | CMake 重新配置时组件管理器连不上 `components-file.espressif.com` | 设 `IDF_COMPONENT_STORAGE_URL=https://components-file.espressif.cn` 走国内镜像 |
+| ninja 长时间停在同一 obj，gcc/ccache 的 CPU 归零 | 本机 ccache 并发死锁 | `CCACHE_DISABLE=1` + `CMAKE_BUILD_PARALLEL_LEVEL=2`，杀干净残留进程后重跑 |
+| 工具调用时 `Out of memory serializing request` | 第二轮请求要带人格、历史与工具结果，C3 堆不够 | 控制工具输出长度与人格文件大小；`CLAW_CAP_CORE_OUTPUT_SIZE` 在本项目已降到 8 KB |
+
+`idf.py build` 不支持 `-j N`，限制并发要用 `CMAKE_BUILD_PARALLEL_LEVEL` 环境变量。
 
 ## 在别处建构建目录
 

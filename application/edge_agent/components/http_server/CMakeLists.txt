@@ -12,6 +12,7 @@ set(http_server_srcs
     "http_server_config_api.c"
     "http_server_status_api.c"
     "http_server_chat_api.c"
+    "http_server_session_api.c"
     "http_server_json.c"
     "http_server_utils.c"
 )

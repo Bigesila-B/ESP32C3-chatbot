@@ -728,8 +728,13 @@ static esp_err_t app_cap_prepare_web_search(const app_claw_config_t *config,
 static esp_err_t app_cap_register_web_search(const app_claw_config_t *config,
                                              const app_claw_storage_paths_t *paths)
 {
-    (void)config;
     (void)paths;
+
+    /* 两个服务商都没填 Key 时不注册：工具调不通，留在上下文里只会诱导模型瞎调 */
+    if (!config->search_brave_key[0] && !config->search_tavily_key[0]) {
+        ESP_LOGW(TAG, "Web search skipped: no provider key configured");
+        return ESP_OK;
+    }
     return cap_web_search_register_group();
 }
 #endif
@@ -992,7 +997,9 @@ esp_err_t app_capabilities_init(const app_claw_config_t *config,
         ESP_GOTO_ON_ERROR(app_cap_register_entry(entry, config, paths),
                           cleanup, TAG, "Failed to register %s", entry->group_id);
 
-        if (llm_visible_map[i]) {
+        /* 只把真正注册成功的组报给 LLM 可见清单：某些组会因为缺少配置
+         * （例如没填搜索服务商 Key）主动跳过注册，此时不该把工具描述塞进上下文 */
+        if (llm_visible_map[i] && claw_cap_group_exists(entry->group_id)) {
             llm_visible_groups[llm_visible_group_count++] = entry->group_id;
         }
     }

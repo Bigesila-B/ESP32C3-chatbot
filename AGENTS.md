@@ -68,13 +68,25 @@ directly to `claw_core` with the fixed session id `web`.
 
 ### Enabled capabilities
 
-Only these five capability components exist: `cap_boards`, `cap_im_platform`,
-`cap_llm_config`, `cap_session_mgr`, `cap_system`.
+Six capability components are compiled: `cap_boards`, `cap_im_platform`,
+`cap_llm_config`, `cap_session_mgr`, `cap_system`, `cap_web_search`.
+`cap_web_search` provides the `web_search` tool (Tavily or Brave) and is
+registered only when at least one provider key is configured.
 
-Lua, MCP, MicroPython, skills, scheduling, web search and file browsing were
-removed. Do not add them back unless the flash and RAM budget is re-evaluated:
-the build is `CONFIG_APP_CLAW_TEXT_ONLY=y` and the image already uses 52% of the
-factory partition with very little headroom in RAM.
+Lua, MCP, MicroPython, skills, scheduling and file browsing remain removed.
+Do not add them back without re-evaluating RAM: the build is
+`CONFIG_APP_CLAW_TEXT_ONLY=y`, the image uses 52% of the factory partition,
+and the C3 has no PSRAM. Tool calls are memory-sensitive here:
+`claw_cap` allocates a `CLAW_CAP_CORE_OUTPUT_SIZE` buffer per call (8 KB in
+this project), the persona alone is ~6 KB of context, and a second LLM turn
+carries the tool result. Keep tool output short.
+
+`llm_supports_tools` must be `"true"` for any tool to reach the model. The
+tools context provider and the `supports_tools` flag were originally gated out
+of `TEXT_ONLY` builds in upstream; both gates were removed here.
+
+`restart_device` in `cap_system` has `cap_flags = 0` so the model cannot reboot
+the board. Device restart stays on the manual `/api/restart` path.
 
 ## Runtime paths
 
@@ -84,27 +96,49 @@ factory partition with very little headroom in RAM.
   `memory/identity.md`, `MEMORY.md`, session files and router rules.
 - Use `claw_paths_join(CLAW_PATH_DATA, ...)`; never hard-code `/fatfs`.
 
-The persona is injected in `app_claw_build_system_prompt()`, which reads
-`memory/soul.md` on every request. `claw_core` duplicates the returned pointer
-per request, so that buffer must stay valid for the life of the program — it is
-a file-scope static array on purpose.
+The persona and profile files are injected by
+`claw_memory_profile_provider` on every request, reading `soul.md`, `user.md`
+and `identity.md` fresh from the DATA root. `app_claw_build_system_prompt()`
+only returns the short fixed prefix — do not add a second file read there:
+injecting the persona twice pushed the C3 past its heap limit once tools were
+enabled.
+
+Long-term memory entries are rendered into `MEMORY.md`, which the lightweight
+provider injects in full. There is no automatic memory extraction in
+`MEMORY_MODE_LIGHTWEIGHT`; entries are written only by the web console API.
 
 ## Web console
 
 `application/edge_agent/components/http_server/frontend_text/index.html` is the
 entire UI: one file, no build step, embedded with `EMBED_FILES`. Editing it only
-requires a rebuild, not a bundler. Keep it under roughly 30 KB and avoid
+requires a rebuild, not a bundler. Keep it lean (currently ~33 KB) and avoid
 features that break older mobile browsers; it targets phones on the
 provisioning hotspot.
 
+The chat page has a session sidebar backed by `/api/sessions`, `/api/session`
+and `DELETE /api/session`. `POST /api/chat` takes an optional `session` field
+(alphanumeric, `_`, `-`, max 32 chars); the default is `web`. Session files are
+`s_<id>_<hash>.log` under `/fatfs/sessions` — the HTTP layer reverse-parses
+the id from the filename instead of reimplementing the hash.
+
 ## Common pitfalls
 
-- **Route count**: `http_server_core.c` sets `max_uri_handlers`. Every new
-  endpoint must be counted; registration failure aborts at boot through
-  `ESP_ERROR_CHECK`.
+- **Route count**: `http_server_core.c` sets `max_uri_handlers = 20` in the
+  TEXT_ONLY build; 17 are in use. Every new endpoint must be counted;
+  registration failure aborts at boot through `ESP_ERROR_CHECK`.
 - **Component dependencies**: a path dependency listed in `idf_component.yml`
   without `rules` is resolved unconditionally. Deleting such a component breaks
   the CMake configure step even when its Kconfig option is off.
+- **Component registry**: `components-file.espressif.com` may be unreachable in
+  mainland China. When CMake re-runs and fails with "Cannot establish a
+  connection to the component registry", set
+  `IDF_COMPONENT_STORAGE_URL=https://components-file.espressif.cn`.
+- **ccache deadlock**: on this machine concurrent ccache processes can hang with
+  near-zero CPU and stall ninja indefinitely. Build with `CCACHE_DISABLE=1` and
+  `CMAKE_BUILD_PARALLEL_LEVEL=2` when that happens.
+- **Heap headroom**: `Out of memory serializing request` means the second LLM
+  turn (with tool result) could not be serialized. Keep tool output, persona and
+  session history small; do not reintroduce duplicate context providers.
 - **Build cache**: after removing components, delete the `build` directory.
   `idf.py fullclean` refuses when `CMakeCache.txt` is missing; use
   `[System.IO.Directory]::Delete("\\?\path", $true)` on Windows for long paths.

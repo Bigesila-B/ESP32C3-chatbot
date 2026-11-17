@@ -8,7 +8,8 @@ A QQ chatbot running on a single ESP32-C3 with 4 MB of flash, with a built-in we
 
 - Connects to the QQ open platform; works in groups (via @) and direct messages
 - The same firmware also builds the Feishu, Telegram and WeChat channels — fill in credentials and reboot to enable them
-- The web console has its own chat panel using an isolated `web` session, separate from the QQ history
+- The web console has its own chat panel with a session sidebar: create, switch and delete conversations stored on the board
+- Tavily or Brave web search is available; the model calls `web_search` when a question needs up-to-date information
 
 **Memory**
 
@@ -19,11 +20,19 @@ A QQ chatbot running on a single ESP32-C3 with 4 MB of flash, with a built-in we
 **Persona**
 
 - The persona lives in `/memory/soul.md` and is editable from the web console
-- The firmware reads that file while building the system prompt, so changes apply on the next turn without a reboot
+- The memory module re-reads the persona and profile files on every request, so changes apply on the next turn without a reboot
 
 **Web console**
 
 Seven sections: status, chat, persona, memory, model, channels and network. Plain HTML with vanilla JS — no build step, bundled straight into the firmware.
+
+## Web search
+
+Set a Tavily or Brave API key under **Model → Web search**, save and reboot. Tavily takes priority when both are set. The model invokes `web_search` on its own, and up to three short result excerpts are fed back into the next turn.
+
+Two things are required: the model endpoint must support function calling (the **Tool calls** switch on the same page, on by default) and at least one search key must be configured. With no key the tool is not registered and costs no context.
+
+The C3 has no PSRAM, so a tool turn uses more heap than a plain chat. If `Out of memory` appears occasionally, shorten the persona file or use a model with a smaller context window.
 
 ## Hardware
 
