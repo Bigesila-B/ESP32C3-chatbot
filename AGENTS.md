@@ -120,6 +120,12 @@ is off, `app_claw_build_system_prompt()` appends an instruction telling the
 model it cannot save memory — otherwise it would claim "I'll remember that"
 without any way to persist it. Keep this coupling intact.
 
+The `memory_remember` tool description, parameter hint, sample values and
+result text are all in Chinese. This is deliberate: with an English description
+the model wrote English memory entries even when told to match the user's
+language. Do not translate that descriptor back to English without also
+re-testing what language the stored entries end up in.
+
 ## Web console
 
 `application/edge_agent/components/http_server/frontend_text/index.html` is the

@@ -45,19 +45,19 @@ static esp_err_t cap_memory_note_execute(const char *input_json,
     }
     root = cJSON_Parse(input_json ? input_json : "{}");
     if (!root) {
-        snprintf(output, output_size, "Error: invalid input JSON");
+        snprintf(output, output_size, "错误：输入不是合法的 JSON");
         return ESP_ERR_INVALID_ARG;
     }
 
     content = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "content"));
     if (!content || !content[0]) {
         cJSON_Delete(root);
-        snprintf(output, output_size, "Error: content is required");
+        snprintf(output, output_size, "错误：缺少 content");
         return ESP_ERR_INVALID_ARG;
     }
     if (strlen(content) > CAP_MEMORY_NOTE_MAX_BYTES) {
         cJSON_Delete(root);
-        snprintf(output, output_size, "Error: memory text is too long (max %d bytes)",
+        snprintf(output, output_size, "错误：这条记忆太长（最多 %d 字节）",
                  CAP_MEMORY_NOTE_MAX_BYTES);
         return ESP_ERR_INVALID_ARG;
     }
@@ -70,14 +70,13 @@ static esp_err_t cap_memory_note_execute(const char *input_json,
     cJSON_Delete(root);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "failed to store memory: %s", esp_err_to_name(err));
-        snprintf(output, output_size, "Error: failed to save memory (%s)",
-                 esp_err_to_name(err));
+        snprintf(output, output_size, "错误：写入记忆失败（%s）", esp_err_to_name(err));
         return err;
     }
 
     /* 告诉模型这次是新增还是已存在，避免它下一轮重复调用 */
-    snprintf(output, output_size, "%s: %s",
-             changed ? "Saved to long-term memory" : "Already in long-term memory",
+    snprintf(output, output_size, "%s：%s",
+             changed ? "已写入长期记忆" : "这条已经记过了",
              item.content);
     return ESP_OK;
 }
@@ -88,17 +87,16 @@ static const claw_cap_descriptor_t s_memory_note_descriptors[] = {
         .name = "memory_remember",
         .family = "memory",
         .description =
-            "Save ONE durable fact about the user to long-term memory, such as their name, "
-            "role, current project, hardware they own, or a stable preference. "
-            "Call this when the user states such a fact or explicitly asks you to remember something. "
-            "Do NOT save greetings, questions, transient tasks, assistant opinions, or anything "
-            "already known. The content MUST be written in the SAME language as the user's "
-            "message (Chinese when the user writes Chinese) — never translate it to English. "
-            "Keep the text short, factual and self-contained.",
+            "把一条关于用户的持久事实写入长期记忆，例如姓名称呼、正在做的项目、手上的设备、稳定的偏好。"
+            "当用户陈述这类事实或明确要求「记住」时调用。"
+            "不要记录问候、提问、临时任务、助手自己的观点，也不要重复记录已经记住的内容。"
+            "content 必须用中文书写，禁止翻译成英文，要简短、客观、单独一条就能看懂。"
+            "示例：「用户喜欢喝美式咖啡」「用户在用 ESP32-C3 做聊天机器人项目」。",
         .kind = CLAW_CAP_KIND_CALLABLE,
         .cap_flags = CLAW_CAP_FLAG_CALLABLE_BY_LLM,
         .input_schema_json =
-            "{\"type\":\"object\",\"properties\":{\"content\":{\"type\":\"string\"}},"
+            "{\"type\":\"object\",\"properties\":{\"content\":{\"type\":\"string\","
+            "\"description\":\"一条用中文书写的简短事实\"}},"
             "\"required\":[\"content\"]}",
         .execute = cap_memory_note_execute,
     },
