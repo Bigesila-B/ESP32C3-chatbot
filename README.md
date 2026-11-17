@@ -15,6 +15,8 @@ A QQ chatbot running on a single ESP32-C3 with 4 MB of flash, with a built-in we
 
 - Session history persists on the device, so conversations survive reboots
 - Long-term memory is stored as entries; the web console edits them one per line
+- With **Auto record** enabled, the model writes durable facts (name, project, hardware, stable preferences) into memory on its own, tagged `auto`; the device de-duplicates them
+- Auto record reuses the tool-call path, so it needs no extra model runtime or request. Turning it off removes the write tool from the model
 - When the context approaches the model window, compaction triggers on a token threshold and summarises older turns
 
 **Persona**

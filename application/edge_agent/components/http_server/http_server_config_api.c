@@ -86,6 +86,7 @@ static const config_field_def_t CONFIG_FIELDS[] = {
     CONFIG_FIELD("search",       search_brave_key),
     CONFIG_FIELD("search",       search_tavily_key),
     CONFIG_FIELD("search",       search_http_allowlist),
+    CONFIG_FIELD("memory",       memory_auto_record),
 
 #if CONFIG_APP_CLAW_CAP_MCP_CLIENT
     CONFIG_FIELD("mcp",          mcp_server_url),

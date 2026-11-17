@@ -94,6 +94,11 @@ dependencies:
       - if: $CONFIG{APP_CLAW_CAP_WEB_SEARCH} == True
     path: ../../claw_capabilities/cap_web_search
 
+  cap_memory_note:
+    rules:
+      - if: $CONFIG{APP_CLAW_CAP_MEMORY} == True
+    path: ../../claw_capabilities/cap_memory_note
+
   claw_cap:
     path: ../../claw_modules/claw_cap
 

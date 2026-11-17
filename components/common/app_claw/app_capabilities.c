@@ -69,6 +69,7 @@
 #endif
 #include "claw_cap.h"
 #if CONFIG_APP_CLAW_CAP_MEMORY
+#include "cap_memory_note.h"
 #include "claw_memory.h"
 #endif
 #include "claw_paths.h"
@@ -676,6 +677,26 @@ static esp_err_t app_cap_register_memory(const app_claw_config_t *config,
 }
 #endif
 
+#if CONFIG_APP_CLAW_CAP_MEMORY
+/* 自动记忆开关默认打开；关闭时不注册工具，模型也就不会往记忆里写东西 */
+static bool app_cap_truthy(const char *value)
+{
+    return value && (strcmp(value, "true") == 0 || strcmp(value, "1") == 0 ||
+                     strcmp(value, "yes") == 0);
+}
+
+static esp_err_t app_cap_register_memory_note(const app_claw_config_t *config,
+                                              const app_claw_storage_paths_t *paths)
+{
+    (void)paths;
+    if (!app_cap_truthy(config->memory_auto_record)) {
+        ESP_LOGW(TAG, "Auto memory recording disabled by config");
+        return ESP_OK;
+    }
+    return cap_memory_note_register_group();
+}
+#endif
+
 #if CONFIG_APP_CLAW_CAP_LLM_INSPECT
 static esp_err_t app_cap_register_llm_inspect(const app_claw_config_t *config,
                                               const app_claw_storage_paths_t *paths)
@@ -822,6 +843,9 @@ static const app_capability_group_entry_t s_capability_group_entries[] = {
 #if CONFIG_APP_CLAW_CAP_MEMORY && CONFIG_APP_CLAW_MEMORY_MODE_FULL
     { "claw_memory", "Memory", "Register claw_memory group", true, NULL, app_cap_register_memory },
 #endif
+#if CONFIG_APP_CLAW_CAP_MEMORY
+    { "cap_memory_note", "Memory Note", "Register memory note cap", true, NULL, app_cap_register_memory_note },
+#endif
 #if CONFIG_APP_CLAW_CAP_LLM_INSPECT
     { "cap_llm_inspect", "LLM Inspect", "Register LLM inspect cap", true, NULL, app_cap_register_llm_inspect },
 #endif
@@ -881,6 +905,9 @@ static const app_capability_group_info_t s_capability_group_infos[] = {
 #endif
 #if CONFIG_APP_CLAW_CAP_MEMORY && CONFIG_APP_CLAW_MEMORY_MODE_FULL
     { "claw_memory", "Memory", true },
+#endif
+#if CONFIG_APP_CLAW_CAP_MEMORY
+    { "cap_memory_note", "Memory Note", true },
 #endif
 #if CONFIG_APP_CLAW_CAP_LLM_INSPECT
     { "cap_llm_inspect", "LLM Inspect", false },

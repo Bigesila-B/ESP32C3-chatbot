@@ -74,6 +74,7 @@ typedef struct {
 #define APP_DEFAULT_WECHAT_ACCOUNT_ID        "default"
 #define APP_DEFAULT_SEARCH_BRAVE_KEY         ""
 #define APP_DEFAULT_SEARCH_TAVILY_KEY        ""
+#define APP_DEFAULT_MEMORY_AUTO_RECORD       "true"
 #define APP_DEFAULT_ENABLED_CAP_GROUPS       ""
 #define APP_DEFAULT_LLM_VISIBLE_CAP_GROUPS   ""
 #define APP_DEFAULT_ENABLED_LUA_MODULES      ""
@@ -116,6 +117,7 @@ static const app_config_field_t s_fields[] = {
     APP_CONFIG_FIELD(search_brave_key, "brave_key", APP_DEFAULT_SEARCH_BRAVE_KEY),
     APP_CONFIG_FIELD(search_tavily_key, "tavily_key", APP_DEFAULT_SEARCH_TAVILY_KEY),
     APP_CONFIG_FIELD(search_http_allowlist, "http_allow_ls", APP_SEARCH_HTTP_ALLOWLIST),
+    APP_CONFIG_FIELD(memory_auto_record, "mem_auto_rec", APP_DEFAULT_MEMORY_AUTO_RECORD),
 #if CONFIG_APP_CLAW_CAP_MCP_CLIENT
     APP_CONFIG_FIELD(mcp_server_url, "mcp_server_url", ""),
 #endif
@@ -885,6 +887,7 @@ void app_config_to_claw(const app_config_t *config, app_claw_config_t *out)
     strlcpy(out->search_http_allowlist,
             config->search_http_allowlist,
             sizeof(out->search_http_allowlist));
+    strlcpy(out->memory_auto_record, config->memory_auto_record, sizeof(out->memory_auto_record));
     strlcpy(out->enabled_cap_groups, config->enabled_cap_groups, sizeof(out->enabled_cap_groups));
     strlcpy(out->llm_visible_cap_groups, config->llm_visible_cap_groups, sizeof(out->llm_visible_cap_groups));
     strlcpy(out->mcp_server_url, config->mcp_server_url, sizeof(out->mcp_server_url));

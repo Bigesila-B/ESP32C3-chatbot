@@ -68,10 +68,12 @@ directly to `claw_core` with the fixed session id `web`.
 
 ### Enabled capabilities
 
-Six capability components are compiled: `cap_boards`, `cap_im_platform`,
-`cap_llm_config`, `cap_session_mgr`, `cap_system`, `cap_web_search`.
+Seven capability components are compiled: `cap_boards`, `cap_im_platform`,
+`cap_llm_config`, `cap_session_mgr`, `cap_system`, `cap_web_search`,
+`cap_memory_note`.
 `cap_web_search` provides the `web_search` tool (Tavily or Brave) and is
-registered only when at least one provider key is configured.
+registered only when at least one provider key is configured. `cap_memory_note`
+provides `memory_remember` and is gated by the `memory_auto_record` setting.
 
 Lua, MCP, MicroPython, skills, scheduling and file browsing remain removed.
 Do not add them back without re-evaluating RAM: the build is
@@ -104,8 +106,19 @@ injecting the persona twice pushed the C3 past its heap limit once tools were
 enabled.
 
 Long-term memory entries are rendered into `MEMORY.md`, which the lightweight
-provider injects in full. There is no automatic memory extraction in
-`MEMORY_MODE_LIGHTWEIGHT`; entries are written only by the web console API.
+provider injects in full.
+
+Automatic recording is provided by `cap_memory_note`: a single
+`memory_remember` tool that calls `claw_memory_store_with_result()` with
+`source = "auto"`. It reuses the main agent's tool-call path, so no second LLM
+runtime is started (the upstream async extraction worker requires
+`MEMORY_MODE_FULL` and would not fit in the C3 heap). De-duplication,
+timestamps and `MEMORY.md` regeneration all live in `claw_memory_store`.
+
+The `memory_auto_record` NVS setting gates registration of that group. When it
+is off, `app_claw_build_system_prompt()` appends an instruction telling the
+model it cannot save memory — otherwise it would claim "I'll remember that"
+without any way to persist it. Keep this coupling intact.
 
 ## Web console
 

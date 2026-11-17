@@ -20,6 +20,8 @@
 * **联网搜索**：移植 `cap_web_search`（Tavily 优先、Brave 备选），模型通过 `web_search` 工具自主发起查询；后台可填两家 API Key，未配置密钥时不注册该工具。为适配 C3 的堆，结果数降到 3 条、正文按 UTF-8 边界截成短摘要。
 * **聊天记录侧边栏**：对话页左侧列出设备上的历史会话，支持新建、切换、删除；新增 `GET /api/sessions`、`GET/DELETE /api/session`，`/api/chat` 增加可选 `session` 参数（默认 `web`）。会话 id 由文件名反解，不重复实现哈希。
 * **工具调用开关**：模型设置页新增「工具调用」下拉并默认开启；搜索能力依赖它。
+* **长期记忆自动记录**：新增 `cap_memory_note` 组件，暴露 `memory_remember` 工具，让模型把对话中的持久事实写进长期记忆，`source=auto`；复用主 agent 的工具调用链路，不额外启动 LLM runtime（上游 FULL 模式的异步抽取 worker 在 C3 上放不下）。去重、时间戳、`MEMORY.md` 渲染全部沿用 `claw_memory_store_with_result()`。
+* 长期记忆页新增「自动记录」开关（`memory_auto_record`，默认开启）与自动条目统计；关闭时工具不注册，并向系统提示追加一句约束，避免模型口头承诺"记住了"却无法落盘。
 
 ### Fix
 

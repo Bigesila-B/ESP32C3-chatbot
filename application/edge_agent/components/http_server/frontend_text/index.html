@@ -253,9 +253,24 @@
           <textarea id="memory-text" rows="16" placeholder="例如：&#10;用户在做嵌入式开发，主要写 C&#10;用户手上有一块 4MB Flash 的 ESP32-C3&#10;用户偏好中文回答，喜欢直接给结论"></textarea>
         </div>
         <p class="field-note">单条建议不超过 80 个汉字，空行会被忽略。清空全部内容会删除所有记忆。</p>
+        <p class="field-note" id="memory-autostat"></p>
         <div class="actions">
           <button id="memory-save">保存记忆</button>
           <button class="ghost" id="memory-reload">重新读取</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>自动记录</h2>
+        <p class="field-note" style="margin-top:0">开启后，模型会在对话里自己把持久事实（称呼、在做的项目、手上的设备、稳定偏好）写成记忆条目，来源标记为 <code>auto</code>；重复的事实由设备去重。关闭后只保留手动编辑。改动需重启生效。</p>
+        <div class="row">
+          <label>自动记录长期记忆</label>
+          <select name="memory_auto_record">
+            <option value="true">开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </div>
+        <div class="actions">
+          <button data-save="memory">保存自动记录设置</button>
         </div>
       </div>
     </section>
@@ -441,7 +456,8 @@
           "llm_supports_tools", "search_tavily_key", "search_brave_key"],
     im: ["qq_app_id", "qq_app_secret", "qq_msg_type", "feishu_app_id", "feishu_app_secret",
          "tg_bot_token", "wechat_token", "wechat_base_url", "wechat_cdn_base_url", "wechat_account_id"],
-    wifi: ["wifi_ssid", "wifi_password", "ap_ssid", "ap_password", "ap_behavior"]
+    wifi: ["wifi_ssid", "wifi_password", "ap_ssid", "ap_password", "ap_behavior"],
+    memory: ["memory_auto_record"]
   };
 
   var loaded = {};
@@ -565,10 +581,15 @@
   async function loadMemoryText() {
     try {
       var items = await api("/api/memory");
-      var lines = (Array.isArray(items) ? items : [])
+      var list = Array.isArray(items) ? items : [];
+      $("memory-text").value = list
         .map(function (item) { return (item.content || "").trim(); })
-        .filter(function (line) { return line.length > 0; });
-      $("memory-text").value = lines.join("\n");
+        .filter(function (line) { return line.length > 0; })
+        .join("\n");
+      var auto = list.filter(function (item) { return item.source === "auto"; }).length;
+      $("memory-autostat").textContent = auto
+        ? "其中 " + auto + " 条由模型自动记录；按行保存时已有条目会保留来源。"
+        : "目前没有自动记录的条目。";
     } catch (error) {
       toast("读取记忆失败：" + error.message, true);
     }
@@ -757,7 +778,10 @@
       }
       if (name === "status") await loadStatus();
       else if (name === "persona") await loadPersona();
-      else if (name === "memory") await loadMemoryText();
+      else if (name === "memory") {
+        await loadMemoryText();
+        await loadConfig("memory");
+      }
       else if (name === "chat") {
         if (!chatEntered) {
           chatEntered = true;

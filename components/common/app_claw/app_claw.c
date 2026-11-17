@@ -623,8 +623,20 @@ static esp_err_t app_claw_publish_startup_event(void)
  * 这里曾经为了排查"人格不生效"重复读过一次 soul.md，导致同一份人格在上下文里
  * 出现两遍。C3 没有 PSRAM，每个请求多背 1.8 KB 直接把堆压到了临界点，
  * 开启工具调用后立刻 OOM，因此改回单一注入源。 */
-static const char *app_claw_build_system_prompt(void)
+/* 自动记忆关闭时给模型一句明确约束，避免它口头承诺"记住了"却根本没能力落盘 */
+#define APP_CLAW_NO_MEMORY_NOTE \
+    "You cannot save long-term memory in this session. Never tell the user you will remember " \
+    "something; say plainly that memory saving is disabled."
+
+static char s_core_system_prompt[sizeof(APP_SYSTEM_PROMPT) + sizeof(APP_CLAW_NO_MEMORY_NOTE) + 8];
+
+static const char *app_claw_build_system_prompt(const app_claw_config_t *config)
 {
+    if (!app_claw_bool_is_true(config->memory_auto_record)) {
+        snprintf(s_core_system_prompt, sizeof(s_core_system_prompt), "%s%s",
+                 APP_SYSTEM_PROMPT, APP_CLAW_NO_MEMORY_NOTE);
+        return s_core_system_prompt;
+    }
     return APP_SYSTEM_PROMPT;
 }
 
@@ -650,7 +662,7 @@ static void app_claw_fill_core_config(const app_claw_config_t *config,
 #endif
     core_config->image_remote_url_only = app_claw_bool_is_true(config->llm_image_remote_url_only);
     core_config->instance_id = 0;
-    core_config->system_prompt = app_claw_build_system_prompt();
+    core_config->system_prompt = app_claw_build_system_prompt(config);
 #if CONFIG_APP_CLAW_CAP_MEMORY
 #if CONFIG_APP_CLAW_MEMORY_MODE_FULL
     core_config->persist_context = claw_memory_persist_context_callback;
