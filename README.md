@@ -17,6 +17,7 @@ A QQ chatbot running on a single ESP32-C3 with 4 MB of flash, with a built-in we
 - Long-term memory is stored as entries; the web console edits them one per line
 - With **Auto record** enabled, the model writes durable facts (name, project, hardware, stable preferences) into memory on its own, tagged `auto`; the device de-duplicates them
 - Auto record reuses the tool-call path, so it needs no extra model runtime or request. Turning it off removes the write tool from the model
+- Guardrails: credentials (keys, passwords, tokens) are refused; restated facts are de-duplicated; auto entries are capped at 24. Manual web-console edits are not affected by de-duplication or the cap
 - When the context approaches the model window, compaction triggers on a token threshold and summarises older turns
 
 **Persona**
@@ -83,7 +84,7 @@ application/edge_agent/            main application
   fatfs_image/                     read-only image with default persona and memory templates
   partitions_4MB.csv               4 MB partition table
 components/
-  claw_capabilities/               capabilities: boards, IM channels, LLM config, sessions, system
+  claw_capabilities/               capabilities: boards, IM channels, LLM config, sessions, system, web search, memory note
   claw_modules/                    agent core: core, memory, event router, cap, skill
   common/                          app wiring, Wi-Fi manager, settings storage, HTTP reuse
 ```

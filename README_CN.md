@@ -8,7 +8,7 @@
 
 - 接入 QQ 开放平台，群聊 @ 和单聊都能用
 - 同一份固件也编译了飞书、Telegram、微信通道，填好凭证重启即可启用
-- 网页后台里可以直接和板子对话，使用独立的 `web` 会话，与 QQ 的历史互不干扰
+- 网页后台里可以直接和板子对话，按会话分文件保存（默认 `web`），与 QQ 的历史互不干扰
 - 对话页左侧是聊天记录侧边栏，能新建、切换、删除会话，历史都存在板子上
 - 接入 Tavily 或 Brave 搜索，模型遇到需要最新信息的问题会自己联网查
 
@@ -85,7 +85,7 @@ application/edge_agent/            主应用
   fatfs_image/                     内置只读文件系统，含人格与记忆的默认模板
   partitions_4MB.csv               4 MB 分区表
 components/
-  claw_capabilities/               能力组件：板型、IM 通道、模型配置、会话、系统
+  claw_capabilities/               能力组件：板型、IM 通道、模型配置、会话、系统、联网搜索、自动记忆
   claw_modules/                    Agent 内核：core、memory、event router、cap、skill
   common/                          应用装配、Wi-Fi 管理、设置存储、HTTP 复用
 ```

@@ -47,6 +47,35 @@ typedef struct {
     long long updated;
 } session_entry_t;
 
+/* 返回不超过 max_bytes 且不会切断 UTF-8 码点的截断点。
+ * 中文一个字 3 字节，直接按字节截断会产出非法 JSON。 */
+static size_t session_utf8_clamp(const char *s, size_t max_bytes)
+{
+    size_t len = s ? strlen(s) : 0;
+    size_t i = 0;
+
+    while (i < len && i < max_bytes) {
+        unsigned char c = (unsigned char)s[i];
+        size_t step = c < 0x80 ? 1
+                      : (c >= 0xC2 && c <= 0xDF) ? 2
+                      : (c >= 0xE0 && c <= 0xEF) ? 3
+                      : (c >= 0xF0 && c <= 0xF4) ? 4 : 1;
+        bool valid = true;
+
+        if (i + step > len || i + step > max_bytes) {
+            break;
+        }
+        for (size_t k = 1; k < step; k++) {
+            if (((unsigned char)s[i + k] & 0xC0) != 0x80) {
+                valid = false;
+                break;
+            }
+        }
+        i += valid ? step : 1;
+    }
+    return i;
+}
+
 /* 会话 id 只允许字母数字、下划线和短横线，长度 1..32，供前端生成 */
 static bool session_id_valid(const char *id)
 {
@@ -153,19 +182,17 @@ static void session_scan_title(const char *path, char *out, size_t out_size)
         const char *content = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "content"));
 
         if (role && content && strcmp(role, "user") == 0 && content[0]) {
-            size_t n = 0;
+            size_t max = (SESSION_TITLE_MAX < out_size - 1) ? SESSION_TITLE_MAX : out_size - 1;
+            size_t take = session_utf8_clamp(content, max);
 
-            /* 换行和连续空白在列表里没有意义，统一压成单个空格 */
-            for (const char *p = content; *p && n < SESSION_TITLE_MAX && n + 1 < out_size; p++) {
-                if (*p == '\n' || *p == '\r' || *p == '\t') {
-                    if (n > 0 && out[n - 1] != ' ') {
-                        out[n++] = ' ';
-                    }
-                } else {
-                    out[n++] = *p;
+            /* 换行和制表符在列表里没有意义，统一压成空格（都是单字节，替换安全） */
+            memcpy(out, content, take);
+            out[take] = '\0';
+            for (size_t k = 0; k < take; k++) {
+                if (out[k] == '\n' || out[k] == '\r' || out[k] == '\t') {
+                    out[k] = ' ';
                 }
             }
-            out[n] = '\0';
             cJSON_Delete(root);
             break;
         }
@@ -217,7 +244,8 @@ static void session_collect_entries(session_entry_t *list, size_t *count)
         char full_path[HTTP_SERVER_PATH_MAX];
         struct stat st;
 
-        if (!session_id_from_file(entry->d_name, item.id, sizeof(item.id))) {
+        if (!session_id_from_file(entry->d_name, item.id, sizeof(item.id)) ||
+                !session_id_valid(item.id)) {
             continue;
         }
         strlcpy(item.file, entry->d_name, sizeof(item.file));
@@ -295,7 +323,8 @@ static esp_err_t session_find_file(const char *id, char *out, size_t out_size)
     while ((entry = readdir(dir)) != NULL) {
         char parsed[SESSION_ID_SAFE_MAX + 1];
 
-        if (!session_id_from_file(entry->d_name, parsed, sizeof(parsed))) {
+        if (!session_id_from_file(entry->d_name, parsed, sizeof(parsed)) ||
+                !session_id_valid(parsed)) {
             continue;
         }
         /* 哈希冲突到同名 id 的概率可以忽略，命中即用 */
@@ -369,9 +398,10 @@ static esp_err_t session_read_handler(httpd_req_t *req)
         /* 超长回复截断，前端只要能看到大致内容即可 */
         if (strlen(content) > SESSION_REPLAY_TEXT_MAX) {
             char truncated[SESSION_REPLAY_TEXT_MAX + 1];
+            size_t take = session_utf8_clamp(content, SESSION_REPLAY_TEXT_MAX);
 
-            memcpy(truncated, content, SESSION_REPLAY_TEXT_MAX);
-            truncated[SESSION_REPLAY_TEXT_MAX] = '\0';
+            memcpy(truncated, content, take);
+            truncated[take] = '\0';
             cJSON_AddStringToObject(msg, "content", truncated);
         } else {
             cJSON_AddStringToObject(msg, "content", content);

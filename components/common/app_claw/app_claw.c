@@ -53,6 +53,14 @@
 #endif
 
 static const char *TAG = "app_claw";
+
+/* 被 CAP_MEMORY 与 CAP_CORE 两条路径共用，必须无条件定义 */
+static bool app_claw_bool_is_true(const char *value)
+{
+    return value &&
+           (strcmp(value, "true") == 0 || strcmp(value, "1") == 0 || strcmp(value, "yes") == 0);
+}
+
 #if CONFIG_APP_CLAW_CAP_EVENT_ROUTER
 static const char *APP_STARTUP_EVENT_SOURCE_CAP = "app_claw";
 static const char *APP_STARTUP_EVENT_TYPE = "startup";
@@ -538,12 +546,6 @@ esp_err_t app_claw_set_network_status(bool sta_connected, const char *ap_ssid)
 }
 
 #if CONFIG_APP_CLAW_CAP_MEMORY
-
-static bool app_claw_bool_is_true(const char *value)
-{
-    return value &&
-           (strcmp(value, "true") == 0 || strcmp(value, "1") == 0 || strcmp(value, "yes") == 0);
-}
 
 static esp_err_t init_memory(const app_claw_config_t *config,
                              const app_claw_storage_paths_t *paths,

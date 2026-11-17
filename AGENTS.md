@@ -50,7 +50,7 @@ the agent runtime.
 4. Replies go back through the originating channel.
 
 The web console's chat panel bypasses the router: `POST /api/chat` submits
-directly to `claw_core` with the fixed session id `web`.
+directly to `claw_core` with a per-request session id (default `web`).
 
 ### Key components
 
@@ -128,12 +128,18 @@ re-testing what language the stored entries end up in.
 
 Three guards keep auto-recording from polluting memory: `cap_memory_note`
 refuses credential-like content (`sk-`, `tvly-`, `密钥`, `密码`, `token`, ...);
-`claw_memory_store_prepared_item_internal` applies a loose byte-bigram match
-**only to `source=auto`** entries so a reworded fact does not become a second
-entry; and auto entries are capped at `CLAW_MEMORY_MAX_AUTO_ITEMS` (24) because
-`MEMORY.md` is injected in full every request. Manual web-console writes bypass
-the latter two. Semantic paraphrases with very different wording can still slip
-through — there is no embedding model or extra LLM call on this chip.
+`claw_memory_store_prepared_item_internal` applies a loose substring match
+**only to `source=auto`** entries, so an appended restatement does not become
+a second entry; and auto entries are capped at `CLAW_MEMORY_MAX_AUTO_ITEMS` (24)
+because `MEMORY.md` is injected in full every request. Manual web-console
+writes bypass the latter two.
+
+Do NOT replace that substring test with character-overlap / edit-distance
+similarity: Chinese short sentences that differ by one character (`猫`→`狗`,
+`住北京`→`不住北京`) score near 1.0 and the user's fact update would be
+silently dropped. Prefer an extra entry over losing a new fact — semantic
+paraphrases with different wording can legitimately slip through here, since
+there is no embedding model or spare LLM call on this chip.
 
 ## Web console
 

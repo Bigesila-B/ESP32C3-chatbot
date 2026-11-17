@@ -95,7 +95,7 @@ python -m esptool --port COM6 --baud 460800 write-flash 0x0 backup.bin
 如果源码放在带中文的路径、需要另建一个纯 ASCII 的编译目录，注意别把生成物一起镜像掉：
 
 ```powershell
-robocopy <源码> <构建目录> /MIR /XD .git build managed_components `
+robocopy <源码> <构建目录> /MIR /XD .git build managed_components gen_bmgr_codes `
     /XF sdkconfig sdkconfig.old dependencies.lock
 ```
 

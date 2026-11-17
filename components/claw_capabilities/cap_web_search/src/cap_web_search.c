@@ -21,6 +21,8 @@ static const char *TAG = "cap_web_search";
 /* C3 没有 PSRAM：搜索响应是整块收进堆再解析的，缓冲区按实测响应体积取 12 KB，
  * 结果条数也从 5 降到 3，避免与 LLM 的 TLS 会话叠加时把堆挤爆。 */
 #define CAP_WEB_SEARCH_BUF_SIZE     (12 * 1024)
+/* 响应再长也不能无限 realloc：C3 无 PSRAM，此时 LLM 的 TLS 会话可能仍占着堆 */
+#define CAP_WEB_SEARCH_BUF_MAX      (16 * 1024)
 #define CAP_WEB_SEARCH_RESULT_COUNT 3
 
 typedef enum {
@@ -33,6 +35,7 @@ typedef struct {
     char *data;
     size_t len;
     size_t cap;
+    bool overflow;
 } cap_web_search_buf_t;
 
 typedef struct {
@@ -69,12 +72,18 @@ static esp_err_t cap_web_search_http_event_handler(esp_http_client_event_t *even
     }
 
     append_len = (size_t)event->data_len;
+    if (buf->overflow) {
+        return ESP_OK;
+    }
     if (buf->len + append_len + 1 > buf->cap) {
-        size_t new_cap = buf->cap * 2;
+        size_t new_cap = buf->cap * 2 < CAP_WEB_SEARCH_BUF_MAX
+                             ? buf->cap * 2 : CAP_WEB_SEARCH_BUF_MAX;
         char *new_data = NULL;
 
-        if (new_cap < buf->len + append_len + 1) {
-            new_cap = buf->len + append_len + 1;
+        if (buf->len + append_len + 1 > new_cap) {
+            /* 超出上限就截断并标记，execute 会给出明确错误，不让堆继续膨胀 */
+            append_len = new_cap - buf->len - 1;
+            buf->overflow = true;
         }
         new_data = realloc(buf->data, new_cap);
         if (!new_data) {
@@ -123,6 +132,33 @@ static size_t cap_web_search_url_encode(const char *src, char *dst, size_t dst_s
     return pos;
 }
 
+/* 按 UTF-8 码点算一个字符的长度；非法首字节或截断序列都按单字节跳过，
+ * 避免 memcpy 越过字符串结尾，也避免把半个字符塞进 JSON 请求体。 */
+static size_t cap_web_search_utf8_char_len(const unsigned char *p)
+{
+    unsigned char c = p[0];
+    size_t step;
+
+    if (c < 0x80) {
+        return 1;
+    }
+    if (c >= 0xC2 && c <= 0xDF) {
+        step = 2;
+    } else if (c >= 0xE0 && c <= 0xEF) {
+        step = 3;
+    } else if (c >= 0xF0 && c <= 0xF4) {
+        step = 4;
+    } else {
+        return 1;
+    }
+    for (size_t k = 1; k < step; k++) {
+        if (p[k] == '\0' || (p[k] & 0xC0) != 0x80) {
+            return 1;
+        }
+    }
+    return step;
+}
+
 /* 搜索结果正文按 UTF-8 字符边界截成短摘要。
  * 完整正文会在第二轮 LLM 请求里再被复制一遍，C3 上很容易把堆撑满；
  * 200 字节（约 60 个汉字）足够模型判断这条结果是否相关。 */
@@ -135,11 +171,10 @@ static void cap_web_search_excerpt(const char *src, char *dst, size_t dst_size)
     if (!src || dst_size < 8) {
         return;
     }
-    while (*src && off + 4 < dst_size - 4) {
-        unsigned char c = (unsigned char)*src;
-        size_t step = c < 0x80 ? 1 : (c >= 0xF0 ? 4 : (c >= 0xE0 ? 3 : 2));
+    while (*src) {
+        size_t step = cap_web_search_utf8_char_len((const unsigned char *)src);
 
-        if (off + step > limit) {
+        if (off + step > limit || off + step + 4 >= dst_size) {
             break;
         }
         memcpy(dst + off, src, step);
@@ -421,6 +456,12 @@ static esp_err_t cap_web_search_execute(const char *input_json,
         free(buf.data);
         snprintf(output, output_size, "Error: search request failed (%s)", esp_err_to_name(err));
         return err;
+    }
+    if (buf.overflow) {
+        free(buf.data);
+        snprintf(output, output_size, "Error: search response exceeds %d bytes",
+                 CAP_WEB_SEARCH_BUF_MAX);
+        return ESP_ERR_INVALID_SIZE;
     }
 
     root = cJSON_Parse(buf.data);

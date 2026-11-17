@@ -10,6 +10,9 @@ sdkconfig.priv
 sdkconfig.bmgr_board.old
 dependencies.lock
 managed_components/
+# 板型生成器产物（idf.py bmgr 生成，不入库）
+**/gen_bmgr_codes/
+board_manager.defaults
 
 # IDE / Editor
 .vscode/

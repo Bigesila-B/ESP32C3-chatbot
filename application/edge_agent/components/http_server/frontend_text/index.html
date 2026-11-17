@@ -166,7 +166,8 @@
     .chat-shell { grid-template-columns: 1fr; }
     .sess-pane { height: auto; flex-direction: row; align-items: center; padding: 10px; }
     #sess-new { width: auto; white-space: nowrap; }
-    #sess-list { flex-direction: row; overflow-x: auto; overflow-y: hidden; }
+    #sess-list { flex-direction: row; overflow-x: auto; overflow-y: hidden; min-width: 0; flex: 1 1 0; }
+    #chat-input { min-width: 0; }
     .sess-item { white-space: nowrap; }
     .sess-item > span { max-width: 140px; }
     .msg { max-width: 88%; }
@@ -532,10 +533,25 @@
     }
     var box = $("page-" + page);
     var body = {};
-    box.querySelectorAll("[name]").forEach(function (input) {
-      body[input.name] = input.value;
+    (PAGE_FIELDS[page] || []).forEach(function (name) {
+      var input = box.querySelector('[name="' + name + '"]');
+      if (input) body[name] = input.value;
     });
-    if (page === "llm") body.llm_backend_type = "openai_compatible";
+    if (page === "llm") {
+      /* 两个保存按钮共用同一页字段：数值框留空或填了非数字会让整页 POST 被后端拒绝 */
+      var numbers = ["llm_max_tokens", "llm_context_window"];
+      for (var i = 0; i < numbers.length; i++) {
+        var el = box.querySelector('[name="' + numbers[i] + '"]');
+        if (!el) continue;
+        var v = el.value.trim();
+        if (!v) el.value = "0";
+        else if (!/^\d+$/.test(v)) {
+          toast("Token 与上下文窗口只能填数字", true);
+          return;
+        }
+      }
+      body.llm_backend_type = "openai_compatible";
+    }
 
     button.disabled = true;
     try {
@@ -666,6 +682,10 @@
   }
 
   async function openSession(id, quiet) {
+    if (chatBusy) {
+      toast("正在等待回复，请稍后再切换会话");
+      return;
+    }
     chatSession = id;
     renderSessions();
     var log = $("chat-log");
@@ -683,6 +703,10 @@
   }
 
   function newSession() {
+    if (chatBusy) {
+      toast("正在等待回复，请稍后再新建会话");
+      return;
+    }
     /* 用时间戳生成新 id，设备侧在收到第一条消息时才会落盘 */
     chatSession = "web-" + Date.now().toString(36);
     sessionsCache = sessionsCache.filter(function (s) { return s.id !== chatSession; });
@@ -693,6 +717,10 @@
   }
 
   async function removeSession(id) {
+    if (chatBusy) {
+      toast("正在等待回复，请稍后再删除会话");
+      return;
+    }
     if (!confirm("删除这条对话记录？删除后无法恢复。")) return;
     try {
       await api("/api/session?id=" + encodeURIComponent(id), { method: "DELETE" });
@@ -721,6 +749,8 @@
     var input = $("chat-input");
     var text = input.value.trim();
     if (!text) return;
+    /* 快照当前会话：万一等待期间会话被切换，旧回复不能贴到新会话里 */
+    var sentSession = chatSession;
 
     appendMsg("user", text);
     input.value = "";
@@ -734,9 +764,10 @@
       var res = await api("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, session: chatSession })
+        body: JSON.stringify({ message: text, session: sentSession })
       });
       pending.remove();
+      if (chatSession !== sentSession) return;
       if (res.ok && res.reply) {
         appendMsg("bot", res.reply);
         /* 首条消息落盘后，这个会话才会出现在左侧列表里 */
@@ -746,6 +777,7 @@
       }
     } catch (error) {
       pending.remove();
+      if (chatSession !== sentSession) return;
       appendMsg("err", "请求失败：" + error.message);
     } finally {
       chatBusy = false;
