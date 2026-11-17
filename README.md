@@ -37,6 +37,25 @@ Two things are required: the model endpoint must support function calling (the *
 
 The C3 has no PSRAM, so a tool turn uses more heap than a plain chat. If `Out of memory` appears occasionally, shorten the persona file or use a model with a smaller context window.
 
+## Network diagnostics
+
+The **Status** page now carries a **link quality** card and a **Run self-test** button, so "it cannot reach the API" can be split into Wi-Fi, network and server causes:
+
+- **Signal**: live RSSI. Above −60 dBm is good, below −70 starts dropping packets, below −80 frequently times out during handshakes
+- **Channel / disconnects since boot / last disconnect reason**: reason codes are translated, e.g. "auth expired", "beacon lost"
+- **Self-test**: three rounds against the model endpoint, timing DNS, TCP connect and the full HTTPS round trip, plus the HTTP status code and free heap
+
+How to read it:
+
+| Symptom | Meaning |
+|---|---|
+| DNS or TCP already fails | Wi-Fi or router problem |
+| TCP ~20 ms, HTTPS ~1 s, three rounds OK | Link is fine; the cost is the TLS handshake on this chip |
+| All rounds return 429 | Provider rate limit, unrelated to the network |
+| Page unresponsive while ping still works | The model request exhausted the heap; wait for its timeout or reboot |
+
+`GET /api/netdiag` returns the raw JSON for scripting. The self-test needs roughly 20 KB of heap and answers 503 instead of running when less than 45 KB is free.
+
 ## Hardware
 
 - ESP32-C3 with 4 MB flash

@@ -20,9 +20,16 @@ static const char *TAG = "http_chat";
 #define HTTP_CHAT_CHANNEL      "web"
 #define HTTP_CHAT_SENDER       "web_user"
 #define HTTP_CHAT_SUBMIT_MS    5000
-/* 模型可能连续调用多次工具，给足等待时间 */
-#define HTTP_CHAT_REPLY_MS     90000
+/* 模型可能连续调用多次工具，给足等待时间。
+ * 必须大于模型请求自身的超时（默认 120 s），否则这里先返回、LLM 还在后台跑，
+ * 占用标记提前释放，后续请求就会和它叠在一起把堆吃光。 */
+#define HTTP_CHAT_REPLY_MS     130000
 #define HTTP_CHAT_MAX_INPUT    2000
+
+/* C3 只有几十 KB 堆，一次对话在模型返回前会一直占着 TLS 缓冲和请求上下文。
+ * 上一轮还没收尾时又进来一条，就会把堆吃光，之后连 QQ 通道都握手失败。
+ * 所以同一时刻只放一个请求进主链路，其余直接返回 409。 */
+static bool s_chat_busy;
 
 /* 会话 id 与 claw_memory 的命名规则保持一致：字母数字、下划线、短横线 */
 static bool chat_session_id_valid(const char *id)
@@ -51,7 +58,21 @@ static esp_err_t chat_bad_request(httpd_req_t *req, const char *message)
     return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, message);
 }
 
-static esp_err_t chat_handler(httpd_req_t *req)
+static esp_err_t chat_busy_response(httpd_req_t *req)
+{
+    cJSON *out = cJSON_CreateObject();
+
+    if (!out) {
+        return httpd_resp_send_500(req);
+    }
+    cJSON_AddBoolToObject(out, "ok", false);
+    cJSON_AddStringToObject(out, "reply", "");
+    cJSON_AddStringToObject(out, "error", "上一条消息还在处理中，等几秒再发");
+    httpd_resp_set_status(req, "409 Conflict");
+    return http_server_send_json_response(req, out);
+}
+
+static esp_err_t chat_dispatch(httpd_req_t *req)
 {
     claw_core_handle_t core = app_claw_get_core();
     if (!core) {
@@ -131,6 +152,23 @@ static esp_err_t chat_handler(httpd_req_t *req)
 
     claw_core_response_free(&resp);
     return http_server_send_json_response(req, out);
+}
+
+/* 进入主链路前抢占用标记；主链路内部的早退都走 chat_dispatch 的返回值，
+ * 标记只在最外层释放，不会漏。 */
+static esp_err_t chat_handler(httpd_req_t *req)
+{
+    esp_err_t err;
+
+    if (s_chat_busy) {
+        ESP_LOGW(TAG, "chat busy, rejecting request");
+        return chat_busy_response(req);
+    }
+
+    s_chat_busy = true;
+    err = chat_dispatch(req);
+    s_chat_busy = false;
+    return err;
 }
 
 esp_err_t http_server_register_chat_routes(httpd_handle_t server)

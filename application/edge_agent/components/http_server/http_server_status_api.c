@@ -26,7 +26,12 @@ static esp_err_t status_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "ap_active", status.ap_active);
     http_server_json_add_string(root, "ap_ssid", status.ap_ssid);
     http_server_json_add_string(root, "ap_ip", status.ap_ip);
-    http_server_json_add_string(root, "wifi_mode", status.wifi_mode);
+    cJSON_AddStringToObject(root, "wifi_mode", status.wifi_mode ? status.wifi_mode : "");
+    /* 链路质量字段：前端顶部信号格和"连不上"排查都靠这几个值 */
+    cJSON_AddNumberToObject(root, "rssi", status.rssi);
+    cJSON_AddNumberToObject(root, "channel", status.channel);
+    cJSON_AddNumberToObject(root, "reconnect_count", status.reconnect_count);
+    cJSON_AddNumberToObject(root, "last_disconnect_reason", status.last_disconnect_reason);
     return http_server_send_json_response(req, root);
 }
 

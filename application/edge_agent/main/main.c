@@ -185,6 +185,10 @@ static esp_err_t main_get_wifi_status(http_server_wifi_status_t *status)
     status->ap_ssid = wifi_status.ap_ssid;
     status->ap_ip = wifi_status.ap_ip;
     status->wifi_mode = wifi_status.mode;
+    status->rssi = wifi_status.rssi;
+    status->channel = wifi_status.channel;
+    status->reconnect_count = wifi_status.reconnect_count;
+    status->last_disconnect_reason = wifi_status.last_disconnect_reason;
     return ESP_OK;
 }
 

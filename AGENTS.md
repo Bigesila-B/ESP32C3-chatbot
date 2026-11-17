@@ -157,9 +157,24 @@ the id from the filename instead of reimplementing the hash.
 
 ## Common pitfalls
 
-- **Route count**: `http_server_core.c` sets `max_uri_handlers = 20` in the
-  TEXT_ONLY build; 17 are in use. Every new endpoint must be counted;
+- **Route count**: `http_server_core.c` sets `max_uri_handlers = 24` in the
+  TEXT_ONLY build; 19 are in use. Every new endpoint must be counted;
   registration failure aborts at boot through `ESP_ERROR_CHECK`.
+- **TLS receive buffer**: `CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=8192` in the board
+  defaults is a deliberate floor, not an oversight. The mbedtls default of
+  16 KB made handshakes fail with `Dynamic Impl: alloc(...) failed` once the
+  request body, persona and tool list were live at the same time. 4 KB is too
+  small — the certificate chain no longer fits and every HTTPS call fails.
+- **Single-flight chat**: `http_server_chat_api.c` holds a busy flag for the
+  whole model call. `HTTP_CHAT_REPLY_MS` must stay above the configured LLM
+  timeout (default 120 s); otherwise the handler returns, the flag clears while
+  the LLM request is still running, and a second request stacks on top of it
+  until the heap is gone.
+- **Diagnostics endpoint**: `GET /api/netdiag` times DNS, TCP and a full HTTPS
+  round trip three times and reports RSSI, channel, disconnect counters and
+  free heap. `/api/status` carries the same link fields for cheap polling.
+  Keep netdiag behind its heap guard (45 KB) — running it on a nearly full heap
+  makes the situation worse, not better.
 - **Component dependencies**: a path dependency listed in `idf_component.yml`
   without `rules` is resolved unconditionally. Deleting such a component breaks
   the CMake configure step even when its Kconfig option is off.

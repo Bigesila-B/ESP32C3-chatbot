@@ -11,6 +11,7 @@ set(http_server_srcs
     "http_server_assets.c"
     "http_server_config_api.c"
     "http_server_status_api.c"
+    "http_server_netdiag_api.c"
     "http_server_chat_api.c"
     "http_server_session_api.c"
     "http_server_json.c"
@@ -24,6 +25,7 @@ set(http_server_requires
     claw_cap
     claw_utils
     esp_http_server
+    esp_http_client
     heap
 )
 

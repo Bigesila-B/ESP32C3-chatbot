@@ -88,6 +88,17 @@
   .stat { background: #f6faf8; border: 1px solid var(--line); border-radius: 9px; padding: 11px 13px; }
   .stat span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
   .stat strong { font-size: 15px; font-weight: 600; word-break: break-all; }
+  .stat strong.linkq { display: flex; align-items: center; gap: 7px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: #b9c6c1; }
+  .dot.good { background: #1f9d68; }
+  .dot.warn { background: #d79a2b; }
+  .dot.bad { background: #c2453d; }
+  .netdiag-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+  .netdiag-table th, .netdiag-table td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); }
+  .netdiag-table th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .netdiag-table tr:last-child td { border-bottom: 0; }
+  .netdiag-note { margin: 10px 0 0; font-size: 13px; line-height: 1.65; }
+  .netdiag-note.muted { color: var(--muted); }
 
   #chat-card { display: flex; flex-direction: column; height: min(66vh, 560px); padding: 0; overflow: hidden; }
 
@@ -208,6 +219,21 @@
           <button class="ghost" id="btn-refresh">刷新状态</button>
           <button class="danger" id="btn-restart">重启设备</button>
         </div>
+      </div>
+
+      <div class="card">
+        <h2>链路质量</h2>
+        <div class="stats">
+          <div class="stat"><span>信号强度</span><strong class="linkq" id="s-rssi"><i class="dot"></i><b id="s-rssi-text">—</b></strong></div>
+          <div class="stat"><span>信道</span><strong id="s-ch">—</strong></div>
+          <div class="stat"><span>开机后断连</span><strong id="s-recon">—</strong></div>
+          <div class="stat"><span>上次断连原因</span><strong id="s-reason">—</strong></div>
+        </div>
+        <p class="field-note">信号 −60 dBm 以上为良好，−70 以下开始丢包，−80 以下容易出现握手超时。自检会向模型接口连三轮，测 DNS、TCP 和完整 HTTPS 往返。</p>
+        <div class="actions spaced">
+          <button id="btn-netdiag">开始网络自检</button>
+        </div>
+        <div id="netdiag-result"></div>
       </div>
     </section>
 
@@ -494,6 +520,91 @@
     return JSON.parse(text);
   }
 
+  /* 断连原因码来自 Wi-Fi 驱动，常用的几个直接翻成人话，其余留原因码 */
+  var WIFI_REASONS = {
+    1: "不明确", 2: "认证过期", 3: "被路由器踢下线", 4: "关联超时",
+    15: "四次握手超时", 200: "信标丢失", 201: "找不到 AP",
+    202: "认证失败", 203: "关联失败", 204: "握手超时", 205: "连接失败"
+  };
+
+  function fmtMs(v) { return (v == null || v < 0) ? "—" : v + " ms"; }
+
+  function escapeHtml(text) {
+    return String(text == null ? "" : text).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function rssiGrade(rssi) {
+    if (!rssi) return { text: "未知", cls: "" };
+    if (rssi >= -60) return { text: rssi + " dBm · 优秀", cls: "good" };
+    if (rssi >= -70) return { text: rssi + " dBm · 良好", cls: "good" };
+    if (rssi >= -80) return { text: rssi + " dBm · 偏弱", cls: "warn" };
+    return { text: rssi + " dBm · 很弱", cls: "bad" };
+  }
+
+  function renderLinkQuality(s) {
+    var grade = rssiGrade(s.rssi);
+    $("s-rssi-text").textContent = grade.text;
+    $("s-rssi").querySelector(".dot").className = "dot" + (grade.cls ? " " + grade.cls : "");
+    $("s-ch").textContent = s.channel
+      ? s.channel + (s.channel <= 14 ? " · 2.4 GHz" : " · 5 GHz")
+      : "—";
+    $("s-recon").textContent = (s.reconnect_count || 0) + " 次";
+    $("s-reason").textContent = s.last_disconnect_reason
+      ? (WIFI_REASONS[s.last_disconnect_reason] || "原因码 " + s.last_disconnect_reason)
+      : "无";
+  }
+
+  async function runNetdiag() {
+    var btn = $("btn-netdiag");
+    var out = $("netdiag-result");
+    btn.disabled = true;
+    out.innerHTML = '<p class="netdiag-note muted">正在连接模型接口，最多需要十几秒…</p>';
+    try {
+      var r = await api("/api/netdiag", { cache: "no-store" });
+      var rows = (r.rounds || []).map(function (x, i) {
+        var state = x.status
+          ? "HTTP " + x.status
+          : (x.err ? "失败（" + x.err + "）" : "无响应");
+        return "<tr><td>" + (i + 1) + "</td><td>" + fmtMs(x.dns_ms) + "</td><td>" +
+               fmtMs(x.tcp_ms) + "</td><td>" + fmtMs(x.http_ms) + "</td><td>" + state + "</td></tr>";
+      }).join("");
+      out.innerHTML = '<table class="netdiag-table"><thead><tr><th>轮次</th><th>DNS</th>' +
+        "<th>TCP</th><th>HTTPS</th><th>结果</th></tr></thead><tbody>" + rows + "</tbody></table>" +
+        netdiagVerdict(r);
+      if (r.wifi) renderLinkQuality(r.wifi);
+    } catch (error) {
+      out.innerHTML = '<p class="netdiag-note">自检失败：' + escapeHtml(error.message) + "</p>";
+    }
+    btn.disabled = false;
+  }
+
+  function netdiagVerdict(r) {
+    var sum = r.summary || {};
+    var wifi = r.wifi || {};
+    var rssi = wifi.rssi || 0;
+    var parts = [];
+
+    if ((sum.fail || 0) > 0) {
+      parts.push("三轮里有 " + sum.fail + " 轮没连上，链路当前就不稳定。");
+    } else if (rssi <= -80) {
+      parts.push("三轮都连上了，但信号只有 " + rssi + " dBm，属于勉强可用，上传较大请求时容易被重传拖到超时。");
+    } else if (rssi <= -70) {
+      parts.push("三轮都连上了，信号偏弱（" + rssi + " dBm），偶发失败多半出在空口重传。");
+    } else {
+      parts.push("三轮都连上了，链路正常。");
+    }
+    if (sum.avg_http_ms > 0) {
+      parts.push("HTTPS 平均 " + sum.avg_http_ms + " ms，其中 TCP 平均 " +
+                 (sum.avg_tcp_ms > 0 ? sum.avg_tcp_ms : "—") + " ms。");
+    }
+    if (r.heap && r.heap.free) {
+      parts.push("空闲内存 " + Math.round(r.heap.free / 1024) + " KB。");
+    }
+    return '<p class="netdiag-note">' + parts.join("") + "</p>";
+  }
+
   async function loadStatus() {
     try {
       var s = await api("/api/status");
@@ -505,6 +616,7 @@
       $("s-ip").textContent = s.ip || "—";
       $("s-ap").textContent = s.ap_active ? (s.ap_ssid || "已开启") : "未开启";
       $("s-store").textContent = s.storage_base_path || "—";
+      renderLinkQuality(s);
     } catch (error) {
       var box = $("net");
       box.textContent = "无法读取状态";
@@ -841,6 +953,8 @@
     await loadStatus();
     button.disabled = false;
   });
+
+  $("btn-netdiag").addEventListener("click", runNetdiag);
 
   $("btn-restart").addEventListener("click", async function () {
     if (!confirm("确认重启设备？网页会短暂断开。")) return;

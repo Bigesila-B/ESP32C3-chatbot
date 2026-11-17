@@ -37,6 +37,11 @@ typedef struct {
     const char *ap_ip;
     const char *ap_ssid;
     const char *mode;
+    /* 链路诊断用：0 表示当前读不到（未连接或不支持） */
+    int rssi;
+    int channel;
+    unsigned reconnect_count;
+    unsigned last_disconnect_reason;
 } wifi_manager_status_t;
 
 typedef struct {

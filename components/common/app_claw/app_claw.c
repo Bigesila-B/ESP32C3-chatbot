@@ -464,6 +464,21 @@ esp_err_t app_claw_get_config(app_claw_config_t *out_config)
     return ESP_OK;
 }
 
+esp_err_t app_claw_get_llm_base_url(char *out, size_t out_size)
+{
+    ESP_RETURN_ON_FALSE(out && out_size > 0, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_ERROR(app_claw_ensure_config_lock(), TAG, "config lock unavailable");
+
+    xSemaphoreTake(s_config_lock, portMAX_DELAY);
+    if (!s_current_config_valid) {
+        xSemaphoreGive(s_config_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    strlcpy(out, s_current_config.llm_base_url, out_size);
+    xSemaphoreGive(s_config_lock);
+    return ESP_OK;
+}
+
 claw_core_handle_t app_claw_get_core(void)
 {
 #if CONFIG_APP_CLAW_CAP_CORE

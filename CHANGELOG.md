@@ -22,10 +22,14 @@
 * **工具调用开关**：模型设置页新增「工具调用」下拉并默认开启；搜索能力依赖它。
 * **长期记忆自动记录**：新增 `cap_memory_note` 组件，暴露 `memory_remember` 工具，让模型把对话中的持久事实写进长期记忆，`source=auto`；复用主 agent 的工具调用链路，不额外启动 LLM runtime（上游 FULL 模式的异步抽取 worker 在 C3 上放不下）。去重、时间戳、`MEMORY.md` 渲染全部沿用 `claw_memory_store_with_result()`。
 * 长期记忆页新增「自动记录」开关（`memory_auto_record`，默认开启）与自动条目统计；关闭时工具不注册，并向系统提示追加一句约束，避免模型口头承诺"记住了"却无法落盘。
+* **网络诊断**：新增 `GET /api/netdiag`，向模型接口连三轮，分别测 DNS 解析、TCP 建连和完整 HTTPS 往返，返回每轮耗时、状态码、空闲堆与最大可用块；`/api/status` 增加 `rssi`、`channel`、`reconnect_count`、`last_disconnect_reason`。设备状态页新增「链路质量」卡片和自检按钮，断连原因码翻成中文。自检有 45 KB 堆门槛和单实例保护，堆不够时返回 503 而不是硬跑。
 
 ### Fix
 
-* `http_server` 的 `max_uri_handlers` 从 8 提升到 20（当时注册 14 条路由，加入会话接口后为 17 条），修复新增记忆接口后启动即 `ESP_ERR_HTTPD_HANDLERS_FULL` abort 的问题。
+* **对话并发保护**：`/api/chat` 增加单实例占用标记，`HTTP_CHAT_REPLY_MS` 由 90 s 提到 130 s（必须大于模型请求的 120 s 超时）。此前 HTTP 先超时返回、模型请求仍在后台跑，连续的请求会叠在一起把堆吃光，随后连网页和 QQ 通道都握手失败，只能重启恢复。
+* `CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN` 从 16384 降到 8192：实测单次对话握手阶段会出现 `Dynamic Impl: alloc(5193 bytes) failed`，结束后堆又回到 70 KB，属于峰值不足。8 KB 能收下当前服务商的证书链，4 KB 会握不上，已在板级默认值里注明这是下限。
+
+* `http_server` 的 `max_uri_handlers` 从 8 提升到 20（后续随会话、自检接口增至 24，现注册 19 条），修复新增记忆接口后启动即 `ESP_ERR_HTTPD_HANDLERS_FULL` abort 的问题。
 * `TEXT_ONLY` 构建下排除 `cap_im_platform` 的 `cmd_cap_im_*.c`，这些文件依赖 `esp_console`，精简模式下不存在。
 * `TEXT_ONLY` 构建下关闭飞书、Telegram、微信的附件入站，避免 768 KB 的 storage 被图片写满。
 * `http_server` 组件补充 `claw_memory` 的 path 依赖声明，修复头文件搜索路径不通。

@@ -78,6 +78,8 @@ esp_err_t app_claw_set_save_config_callback(app_claw_save_config_fn save_config,
 esp_err_t app_claw_start(const app_claw_config_t *config);
 esp_err_t app_claw_update_config(const app_claw_config_t *config);
 esp_err_t app_claw_get_config(app_claw_config_t *out_config);
+/* 只取模型接口地址：完整配置结构有好几 KB，诊断类接口没必要为此占用堆 */
+esp_err_t app_claw_get_llm_base_url(char *out, size_t out_size);
 esp_err_t app_claw_apply_config(const app_claw_config_t *config);
 claw_core_handle_t app_claw_get_core(void);
 esp_err_t app_claw_ui_start(void);

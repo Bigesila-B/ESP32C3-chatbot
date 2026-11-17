@@ -76,6 +76,9 @@ static void *s_state_cb_user_ctx;
 static esp_timer_handle_t s_reconnect_timer;
 static wifi_manager_config_t s_config;
 static bool s_wifi_started;
+/* 链路质量统计：只累加不重置，用于判断"连不上"是偶发还是链路本身不稳 */
+static unsigned s_reconnect_count;
+static unsigned s_last_disconnect_reason;
 
 static void notify_state_changed(bool force);
 static esp_err_t configure_sta_mode(const wifi_manager_config_t *config);
@@ -320,6 +323,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
             const wifi_event_sta_disconnected_t *disc = event_data;
             uint16_t reason = disc ? disc->reason : 0;
             strlcpy(s_ip_addr, "0.0.0.0", sizeof(s_ip_addr));
+            s_reconnect_count++;
+            s_last_disconnect_reason = reason;
             if (s_connected) {
                 s_connected = false;
                 notify_state_changed(false);
@@ -489,6 +494,19 @@ void wifi_manager_get_status(wifi_manager_status_t *status)
     status->ap_ip = s_ap_ip;
     status->ap_ssid = s_ap_ssid;
     status->mode = wifi_manager_mode_string(s_mode);
+    status->rssi = 0;
+    status->channel = 0;
+    status->reconnect_count = s_reconnect_count;
+    status->last_disconnect_reason = s_last_disconnect_reason;
+
+    /* 信号强度不在事件里，每次按需向驱动取，避免维护一份可能过期的快照 */
+    if (s_connected) {
+        wifi_ap_record_t ap_info = {0};
+        if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+            status->rssi = ap_info.rssi;
+            status->channel = ap_info.primary;
+        }
+    }
 }
 
 esp_netif_t *wifi_manager_get_ap_netif(void)

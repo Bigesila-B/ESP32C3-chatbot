@@ -21,6 +21,12 @@ typedef struct {
     const char *ap_ssid;
     const char *ap_ip;
     const char *wifi_mode;
+    /* 链路质量：rssi 为当前 AP 的信号强度（dBm），0 表示读不到 */
+    int rssi;
+    int channel;
+    /* 开机以来 STA 断连次数与最后一次断连原因码（WIFI_REASON_*） */
+    unsigned reconnect_count;
+    unsigned last_disconnect_reason;
 } http_server_wifi_status_t;
 
 typedef struct {
