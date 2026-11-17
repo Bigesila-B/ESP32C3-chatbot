@@ -28,6 +28,23 @@ static const char *TAG = "cap_memory_note";
 /* 单条记忆上限：与 claw_memory_item_t.content[256] 保持一致并留一点余量 */
 #define CAP_MEMORY_NOTE_MAX_BYTES 220
 
+/* 凭证类内容不能进长期记忆：条目会明文落在 flash 上，
+ * 还会随 MEMORY.md 注入到每一次模型请求里，等于发给服务商。 */
+static bool cap_memory_note_contains_secret(const char *text)
+{
+    static const char *const markers[] = {
+        "sk-", "tvly-", "ghp_", "Bearer ", "api key", "API key", "API Key",
+        "access key", "密钥", "口令", "密码", "token", "Token", "secret", "Secret"
+    };
+
+    for (size_t i = 0; i < sizeof(markers) / sizeof(markers[0]); i++) {
+        if (strstr(text, markers[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static esp_err_t cap_memory_note_execute(const char *input_json,
                                          const claw_cap_call_context_t *ctx,
                                          char *output,
@@ -59,7 +76,20 @@ static esp_err_t cap_memory_note_execute(const char *input_json,
         cJSON_Delete(root);
         snprintf(output, output_size, "错误：这条记忆太长（最多 %d 字节）",
                  CAP_MEMORY_NOTE_MAX_BYTES);
-        return ESP_ERR_INVALID_ARG;
+        return ESP_OK;
+    }
+    if (cap_memory_note_contains_secret(content)) {
+        cJSON_Delete(root);
+        snprintf(output, output_size,
+                 "拒绝写入：长期记忆不能保存密钥、密码、令牌等凭证，"
+                 "它们会明文存在设备上并随每次对话发送。请向用户说明，"
+                 "并改为记录非敏感的事实（例如「用户在做某个项目」）。");
+        return ESP_OK;
+    }
+    if (strlen(content) < 8) {
+        cJSON_Delete(root);
+        snprintf(output, output_size, "拒绝写入：内容太短，请写成一条完整明确的事实。");
+        return ESP_OK;
     }
 
     strlcpy(item.content, content, sizeof(item.content));
@@ -68,6 +98,13 @@ static esp_err_t cap_memory_note_execute(const char *input_json,
 
     err = claw_memory_store_with_result(&item, &changed);
     cJSON_Delete(root);
+    if (err == ESP_ERR_NO_MEM) {
+        /* 底层用它同时表示「自动条目已达上限」和真的分配失败，两种情况都建议清理 */
+        snprintf(output, output_size,
+                 "拒绝写入：自动记忆已达条数上限，或设备内存不足。"
+                 "请让用户到网页后台清理长期记忆后再试。");
+        return ESP_OK;
+    }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "failed to store memory: %s", esp_err_to_name(err));
         snprintf(output, output_size, "错误：写入记忆失败（%s）", esp_err_to_name(err));
@@ -90,6 +127,7 @@ static const claw_cap_descriptor_t s_memory_note_descriptors[] = {
             "把一条关于用户的持久事实写入长期记忆，例如姓名称呼、正在做的项目、手上的设备、稳定的偏好。"
             "当用户陈述这类事实或明确要求「记住」时调用。"
             "不要记录问候、提问、临时任务、助手自己的观点，也不要重复记录已经记住的内容。"
+            "绝对不要记录密钥、密码、令牌、API Key 等任何凭证。"
             "content 必须用中文书写，禁止翻译成英文，要简短、客观、单独一条就能看懂。"
             "示例：「用户喜欢喝美式咖啡」「用户在用 ESP32-C3 做聊天机器人项目」。",
         .kind = CLAW_CAP_KIND_CALLABLE,

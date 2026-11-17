@@ -126,6 +126,15 @@ the model wrote English memory entries even when told to match the user's
 language. Do not translate that descriptor back to English without also
 re-testing what language the stored entries end up in.
 
+Three guards keep auto-recording from polluting memory: `cap_memory_note`
+refuses credential-like content (`sk-`, `tvly-`, `密钥`, `密码`, `token`, ...);
+`claw_memory_store_prepared_item_internal` applies a loose byte-bigram match
+**only to `source=auto`** entries so a reworded fact does not become a second
+entry; and auto entries are capped at `CLAW_MEMORY_MAX_AUTO_ITEMS` (24) because
+`MEMORY.md` is injected in full every request. Manual web-console writes bypass
+the latter two. Semantic paraphrases with very different wording can still slip
+through — there is no embedding model or extra LLM call on this chip.
+
 ## Web console
 
 `application/edge_agent/components/http_server/frontend_text/index.html` is the

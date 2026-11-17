@@ -151,7 +151,9 @@ void claw_memory_collect_summary_labels(const claw_memory_item_t *item,
 esp_err_t claw_memory_append_item_summary_labels(const claw_memory_item_t *item,
                                                  char **out_summary_list);
 bool claw_memory_items_semantically_match(const claw_memory_item_t *existing,
-                                          const claw_memory_item_t *incoming);
+                                         const claw_memory_item_t *incoming);
+bool claw_memory_items_loosely_match(const claw_memory_item_t *existing,
+                                     const claw_memory_item_t *incoming);
 bool claw_memory_items_equivalent_for_update(const claw_memory_item_t *existing,
                                              const claw_memory_item_t *replacement);
 esp_err_t claw_memory_replace_conflicting_items(const claw_memory_item_t *incoming,

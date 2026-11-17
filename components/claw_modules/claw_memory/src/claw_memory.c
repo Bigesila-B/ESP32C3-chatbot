@@ -50,6 +50,11 @@ static void claw_memory_fill_defaults(claw_memory_item_t *item)
     }
 }
 
+/* 自动记录条数上限：MEMORY.md 会整篇注入每次请求，
+ * 128 条通用上限对 C3 太宽松，自动条目单独收紧，避免上下文膨胀导致 OOM。
+ * 网页手工写入不受此限制。 */
+#define CLAW_MEMORY_MAX_AUTO_ITEMS 24
+
 static esp_err_t claw_memory_store_prepared_item_internal(claw_memory_item_t *item,
                                                           const char *digest_action,
                                                           const char *digest_extra,
@@ -96,6 +101,21 @@ static esp_err_t claw_memory_store_prepared_item_internal(claw_memory_item_t *it
     if (err != ESP_OK) {
         return err;
     }
+    if (item->source[0] && strcmp(item->source, "auto") == 0) {
+        size_t auto_count = 0;
+
+        for (i = 0; i < items.count; i++) {
+            if (!items.items[i].deleted &&
+                    strcmp(items.items[i].source, "auto") == 0) {
+                auto_count++;
+            }
+        }
+        if (auto_count >= CLAW_MEMORY_MAX_AUTO_ITEMS) {
+            ESP_LOGW(TAG, "auto memory limit reached: %u", (unsigned)auto_count);
+            claw_memory_item_list_free(&items);
+            return ESP_ERR_NO_MEM;
+        }
+    }
     for (i = 0; i < items.count; i++) {
         if (ignore_existing_id && ignore_existing_id[0] &&
             strcmp(items.items[i].id, ignore_existing_id) == 0) {
@@ -113,6 +133,15 @@ static esp_err_t claw_memory_store_prepared_item_internal(claw_memory_item_t *it
             }
         }
         if (claw_memory_items_semantically_match(&items.items[i], item)) {
+            safe_copy(item->id, sizeof(item->id), items.items[i].id);
+            *item = items.items[i];
+            claw_memory_item_list_free(&items);
+            return ESP_OK;
+        }
+        /* 自动记录额外做一次近义去重：模型换个措辞复述同一事实时不再新增条目。
+         * 只作用于 source=auto，网页手工写入仍按用户原样保留。 */
+        if (item->source[0] && strcmp(item->source, "auto") == 0 &&
+                claw_memory_items_loosely_match(&items.items[i], item)) {
             safe_copy(item->id, sizeof(item->id), items.items[i].id);
             *item = items.items[i];
             claw_memory_item_list_free(&items);

@@ -139,6 +139,49 @@ bool claw_memory_items_semantically_match(const claw_memory_item_t *existing,
     return false;
 }
 
+/* 计算 a 的相邻字节对里有多少能在 b 中找到。
+ * 中文 UTF-8 每个字 3 字节，字节二元组足够反映短句的字面重合度，
+ * 而且不需要额外分配内存 —— C3 上这点很重要。 */
+static float claw_memory_bigram_coverage(const char *a, const char *b)
+{
+    size_t la = a ? strlen(a) : 0;
+    size_t lb = b ? strlen(b) : 0;
+    size_t matched = 0;
+    size_t total = 0;
+
+    if (la < 4 || lb < 4) {
+        return 0.0f;
+    }
+    for (size_t i = 0; i + 1 < la; i++) {
+        total++;
+        for (size_t j = 0; j + 1 < lb; j++) {
+            if (a[i] == b[j] && a[i + 1] == b[j + 1]) {
+                matched++;
+                break;
+            }
+        }
+    }
+    return total ? (float)matched / (float)total : 0.0f;
+}
+
+/* 比 semantic key 更宽松的近义去重，只用于自动记录。
+ * 模型换个说法复述同一事实（「用户喜欢喝美式咖啡」/「用户平时喜欢喝美式咖啡」）
+ * 时，原先的 key 判定会放行，导致 MEMORY.md 里越堆越多。 */
+bool claw_memory_items_loosely_match(const claw_memory_item_t *existing,
+                                     const claw_memory_item_t *incoming)
+{
+    float forward;
+    float backward;
+
+    if (!existing || !incoming || existing->deleted) {
+        return false;
+    }
+    forward = claw_memory_bigram_coverage(existing->content, incoming->content);
+    backward = claw_memory_bigram_coverage(incoming->content, existing->content);
+    /* 取较大值：一句只是比另一句多了几个修饰词时也算同一条 */
+    return (forward > backward ? forward : backward) >= 0.78f;
+}
+
 bool claw_memory_items_equivalent_for_update(const claw_memory_item_t *existing,
                                              const claw_memory_item_t *replacement)
 {
