@@ -45,11 +45,3 @@
 * **前端**：`chatBusy` 期间禁止新建/切换/删除会话，并快照会话 id 防止旧回复串到新会话；`savePage` 改用 `PAGE_FIELDS` 白名单并校验数值字段；移动端补 `min-width:0` 防横向溢出。
 * `.gitignore` 补 `**/gen_bmgr_codes/` 与 `board_manager.defaults`，与 `BUILD_NOTES.md` 的描述一致。
 * 文档自查：修正「会话固定为 web」「14 条路由」「页面约 26 KB」「能力组件 5 个」等与新实现矛盾的表述，英文 README 补齐护栏说明。
-
-### 网页后台认证
-
-* **管理密码 + 令牌**：新增 `http_server_auth.c`，口令以加盐 SHA-256 存 NVS（无出厂默认密码），登录/首次设置/改密码三个动作走 `/api/auth`，成功后发 32 字符内存态令牌，设备重启即失效。首次设置可顺带保存 Wi-Fi，保证新设备仍能配网。
-* **认证闸门**：配置、记忆、会话、对话、重启接口全部要求 `Authorization: Bearer`；首页、`/api/status`、`/api/auth` 为例外。新增 `HTTP_SERVER_GATED_HANDLER` 包装宏，后续加接口时改路由表即可顺带保护。
-* **密钥不回显**：模型 Key、搜索 Key、Wi-Fi 密码、各 IM 凭证改用项目已有的 `CONFIG_SECRET_FIELD`，GET 只回 `xxx_set` 布尔；POST 空串表示保持原值，显式 JSON `null` 才清除。前端显示「已设置，留空保持不变」并提供清除按钮。
-* **堵住密钥外发**：`llm_base_url` 不再通过网页热更新，运行中的地址固定为当前值，新地址重启后才生效；修正了配置保存提示与代码不一致的问题。
-* `max_uri_handlers` 从 20 提到 24（现 19 条路由）。

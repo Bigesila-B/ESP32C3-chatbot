@@ -53,12 +53,12 @@ static const config_field_def_t CONFIG_FIELDS[] = {
     CONFIG_FIELD("persona",      persona_style),
 
     CONFIG_FIELD("wifi",         wifi_ssid),
-    CONFIG_SECRET_FIELD("wifi",  wifi_password),
+    CONFIG_FIELD("wifi",         wifi_password),
     CONFIG_FIELD("wifi",         ap_ssid),
-    CONFIG_SECRET_FIELD("wifi",  ap_password),
+    CONFIG_FIELD("wifi",         ap_password),
     CONFIG_FIELD("wifi",         ap_behavior),
 
-    CONFIG_SECRET_FIELD("llm",   llm_api_key),
+    CONFIG_FIELD("llm",          llm_api_key),
     CONFIG_FIELD("llm",          llm_backend_type),
     CONFIG_FIELD("llm",          llm_model),
     CONFIG_FIELD("llm",          llm_base_url),
@@ -73,19 +73,19 @@ static const config_field_def_t CONFIG_FIELDS[] = {
     CONFIG_FIELD("llm",          llm_image_remote_url_only),
 
     CONFIG_FIELD("im",           qq_app_id),
-    CONFIG_SECRET_FIELD("im",    qq_app_secret),
+    CONFIG_FIELD("im",           qq_app_secret),
     CONFIG_FIELD("im",           qq_msg_type),
     CONFIG_FIELD("im",           feishu_app_id),
-    CONFIG_SECRET_FIELD("im",    feishu_app_secret),
-    CONFIG_SECRET_FIELD("im",    tg_bot_token),
-    CONFIG_SECRET_FIELD("im",    wechat_token),
+    CONFIG_FIELD("im",           feishu_app_secret),
+    CONFIG_FIELD("im",           tg_bot_token),
+    CONFIG_FIELD("im",           wechat_token),
     CONFIG_FIELD("im",           wechat_base_url),
     CONFIG_FIELD("im",           wechat_cdn_base_url),
     CONFIG_FIELD("im",           wechat_account_id),
 
-    CONFIG_SECRET_FIELD("search", search_brave_key),
-    CONFIG_SECRET_FIELD("search", search_tavily_key),
-    CONFIG_FIELD("search",        search_http_allowlist),
+    CONFIG_FIELD("search",       search_brave_key),
+    CONFIG_FIELD("search",       search_tavily_key),
+    CONFIG_FIELD("search",       search_http_allowlist),
     CONFIG_FIELD("memory",       memory_auto_record),
 
 #if CONFIG_APP_CLAW_CAP_MCP_CLIENT
@@ -346,9 +346,8 @@ static esp_err_t config_post_handler(httpd_req_t *req)
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON body");
     }
 
-    /* 部分写入：只处理 body 中出现的字段。
-     * 密钥字段例外：GET 只回显 xxx_set 布尔，前端拿不到明文，
-     * 因此空字符串表示「保持不变」，显式 JSON null 才表示清除。 */
+    /* Partial writes: only fields present in the JSON body are applied.
+     * Empty string is a valid value (lets the client clear a slot). */
     size_t applied_count = 0;
 
 #if CONFIG_APP_CLAW_CAP_MCP_CLIENT
@@ -369,18 +368,7 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     for (size_t i = 0; i < CONFIG_FIELD_COUNT; i++) {
         const config_field_def_t *field = &CONFIG_FIELDS[i];
         cJSON *item = cJSON_GetObjectItemCaseSensitive(root, field->name);
-
-        if (field->configured_flag && cJSON_IsNull(item)) {
-            /* 显式 null 才清除已存密钥 */
-            memset(field_mutable(config, field), 0, field->size);
-            applied_count++;
-            continue;
-        }
         if (!cJSON_IsString(item)) {
-            continue;
-        }
-        if (field->configured_flag && item->valuestring[0] == '\0') {
-            /* 密钥输入框留空 = 不修改，避免一次无关保存把 Key 清掉 */
             continue;
         }
 #if CONFIG_APP_CLAW_CAP_MCP_CLIENT
@@ -458,14 +446,11 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     return http_server_send_json_response(req, resp);
 }
 
-HTTP_SERVER_GATED_HANDLER(config_get_handler)
-HTTP_SERVER_GATED_HANDLER(config_post_handler)
-
 esp_err_t http_server_register_config_routes(httpd_handle_t server)
 {
     const httpd_uri_t handlers[] = {
-        { .uri = "/api/config", .method = HTTP_GET,  .handler = gated_config_get_handler  },
-        { .uri = "/api/config", .method = HTTP_POST, .handler = gated_config_post_handler },
+        { .uri = "/api/config", .method = HTTP_GET,  .handler = config_get_handler  },
+        { .uri = "/api/config", .method = HTTP_POST, .handler = config_post_handler },
     };
 
     for (size_t i = 0; i < sizeof(handlers) / sizeof(handlers[0]); ++i) {

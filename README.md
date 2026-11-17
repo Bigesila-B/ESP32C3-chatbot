@@ -37,24 +37,6 @@ Two things are required: the model endpoint must support function calling (the *
 
 The C3 has no PSRAM, so a tool turn uses more heap than a plain chat. If `Out of memory` appears occasionally, shorten the persona file or use a model with a smaller context window.
 
-## Access and authentication
-
-The first visit asks you to set an admin password (6–64 characters) and optionally Wi-Fi credentials. Only a salted SHA-256 hash is stored in NVS — there is no factory default password and nothing is written to the repository.
-
-After login the device issues an in-memory token kept in `sessionStorage`. **Rebooting the device, closing the tab, or clicking Log out requires a new login.** The Change password button is in the header.
-
-Protected endpoints: config, memory, sessions, chat and restart. The only exceptions are the index page, `/api/status` (IP / AP name only) and `/api/auth`.
-
-Secret settings (model key, search keys, Wi-Fi password, IM credentials) are no longer returned in clear text — the UI shows "already set, leave blank to keep" and offers a clear button. Changing the model base URL requires a reboot on purpose, so nobody can redirect the API key to another host.
-
-**Known limit**: there is no TLS server on the device, so the password travels in clear text over local HTTP. Use the console only on a trusted network and set a password on the provisioning AP.
-
-**Forgot the password?** Erase the NVS partition to factory-reset (this also clears Wi-Fi and every key):
-
-```bash
-python -m esptool --port COM5 erase_region 0xa000 0x6000
-```
-
 ## Hardware
 
 - ESP32-C3 with 4 MB flash

@@ -57,21 +57,6 @@ esp_err_t http_server_register_memory_routes(httpd_handle_t server);
 #endif
 esp_err_t http_server_register_chat_routes(httpd_handle_t server);
 esp_err_t http_server_register_session_routes(httpd_handle_t server);
-esp_err_t http_server_register_auth_routes(httpd_handle_t server);
-
-/* 认证闸门：校验失败时 check 已经发出 401，handler 直接返回即可 */
-bool http_server_auth_check(httpd_req_t *req);
-bool http_server_auth_is_configured(void);
-#define HTTP_SERVER_AUTH_GATE(req) do { \
-        if (!http_server_auth_check(req)) return ESP_OK; \
-    } while (0)
-
-/* 给已有的 static handler 生成带认证闸门的包装，路由表里改用 gated_ 版本 */
-#define HTTP_SERVER_GATED_HANDLER(name) \
-    static esp_err_t gated_##name(httpd_req_t *req) { \
-        HTTP_SERVER_AUTH_GATE(req); \
-        return name(req); \
-    }
 esp_err_t http_server_register_chat_help_routes(httpd_handle_t server);
 esp_err_t http_server_register_skill_catalog_routes(httpd_handle_t server);
 esp_err_t http_server_register_files_routes(httpd_handle_t server);

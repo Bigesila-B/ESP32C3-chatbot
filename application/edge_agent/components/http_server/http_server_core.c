@@ -75,10 +75,10 @@ esp_err_t http_server_start(void)
     config.ctrl_port = HTTP_SERVER_CTRL_PORT;
     config.stack_size = 8192;
 #if CONFIG_APP_CLAW_TEXT_ONLY
-    /* 首页 2 + 配置 2 + 状态 2 + 记忆 7 + 聊天 1 + 会话 3 + 认证 2 = 19，留足余量。
+    /* 首页 2 + 配置 2 + 状态 2 + 记忆 4 + 文档读写 2 + 批量 1 + 聊天 1 + 会话 3 = 17，留足余量。
      * 槽位不足会让 httpd_register_uri_handler 返回 HANDLERS_FULL，
      * 经 ESP_RETURN_ON_ERROR 冒泡到 main 的 ESP_ERROR_CHECK 后直接 abort。 */
-    config.max_uri_handlers = 24;
+    config.max_uri_handlers = 20;
     config.max_open_sockets = 4;
 #else
     /* 全量构建约 34 个路由，同样留出余量 */
@@ -100,7 +100,6 @@ esp_err_t http_server_start(void)
 
     ESP_RETURN_ON_ERROR(httpd_start(&s_ctx.server, &config), TAG, "Failed to start HTTP server");
     ESP_RETURN_ON_ERROR(http_server_register_assets_routes(s_ctx.server), TAG, "Failed to register assets routes");
-    ESP_RETURN_ON_ERROR(http_server_register_auth_routes(s_ctx.server), TAG, "Failed to register auth routes");
     ESP_RETURN_ON_ERROR(http_server_register_config_routes(s_ctx.server), TAG, "Failed to register config routes");
     ESP_RETURN_ON_ERROR(http_server_register_status_routes(s_ctx.server), TAG, "Failed to register status routes");
 #if CONFIG_APP_CLAW_CAP_MEMORY

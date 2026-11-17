@@ -122,21 +122,6 @@ static esp_err_t main_save_config(const app_config_t *config)
         return ESP_OK;
     }
     app_config_to_claw(config, claw_config);
-
-    /* 安全：模型接口地址不允许通过网页热更新。
-     * 否则任何能调用 /api/config 的人都能把 llm_base_url 改成自己的服务器，
-     * 下一次对话就把 Authorization: Bearer <llm_api_key> 发过去。
-     * 这里把热更新用的地址固定为当前运行值，新地址只在重启后从 NVS 生效。 */
-    app_claw_config_t *running = calloc(1, sizeof(*running));
-    if (!running || app_claw_get_config(running) != ESP_OK) {
-        free(running);
-        free(claw_config);
-        ESP_LOGW(TAG, "Runtime config unavailable; saved settings apply after reboot");
-        return ESP_OK;
-    }
-    strlcpy(claw_config->llm_base_url, running->llm_base_url, sizeof(claw_config->llm_base_url));
-    free(running);
-
     err = app_claw_update_config(claw_config);
     free(claw_config);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {

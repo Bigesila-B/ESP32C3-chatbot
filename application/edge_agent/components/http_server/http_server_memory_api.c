@@ -367,24 +367,16 @@ static esp_err_t memory_bulk_handler(httpd_req_t *req)
     return http_server_send_json_response(req, out);
 }
 
-HTTP_SERVER_GATED_HANDLER(memory_list_handler)
-HTTP_SERVER_GATED_HANDLER(memory_create_handler)
-HTTP_SERVER_GATED_HANDLER(memory_update_handler)
-HTTP_SERVER_GATED_HANDLER(memory_delete_handler)
-HTTP_SERVER_GATED_HANDLER(memory_doc_get_handler)
-HTTP_SERVER_GATED_HANDLER(memory_doc_post_handler)
-HTTP_SERVER_GATED_HANDLER(memory_bulk_handler)
-
 esp_err_t http_server_register_memory_routes(httpd_handle_t server)
 {
     const httpd_uri_t handlers[] = {
-        { .uri = "/api/memory", .method = HTTP_GET, .handler = gated_memory_list_handler },
-        { .uri = "/api/memory", .method = HTTP_POST, .handler = gated_memory_create_handler },
-        { .uri = "/api/memory", .method = HTTP_PUT, .handler = gated_memory_update_handler },
-        { .uri = "/api/memory", .method = HTTP_DELETE, .handler = gated_memory_delete_handler },
-        { .uri = "/api/memory/doc", .method = HTTP_GET, .handler = gated_memory_doc_get_handler },
-        { .uri = "/api/memory/doc", .method = HTTP_POST, .handler = gated_memory_doc_post_handler },
-        { .uri = "/api/memory/bulk", .method = HTTP_POST, .handler = gated_memory_bulk_handler },
+        { .uri = "/api/memory", .method = HTTP_GET, .handler = memory_list_handler },
+        { .uri = "/api/memory", .method = HTTP_POST, .handler = memory_create_handler },
+        { .uri = "/api/memory", .method = HTTP_PUT, .handler = memory_update_handler },
+        { .uri = "/api/memory", .method = HTTP_DELETE, .handler = memory_delete_handler },
+        { .uri = "/api/memory/doc", .method = HTTP_GET, .handler = memory_doc_get_handler },
+        { .uri = "/api/memory/doc", .method = HTTP_POST, .handler = memory_doc_post_handler },
+        { .uri = "/api/memory/bulk", .method = HTTP_POST, .handler = memory_bulk_handler },
     };
 
     for (size_t i = 0; i < sizeof(handlers) / sizeof(handlers[0]); i++) {
