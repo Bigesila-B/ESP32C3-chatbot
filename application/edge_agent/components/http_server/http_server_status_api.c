@@ -48,11 +48,14 @@ static esp_err_t restart_handler(httpd_req_t *req)
     return http_server_send_json_response(req, root);
 }
 
+/* 状态查询保持开放（只有 IP / SSID），重启必须登录 */
+HTTP_SERVER_GATED_HANDLER(restart_handler)
+
 esp_err_t http_server_register_status_routes(httpd_handle_t server)
 {
     const httpd_uri_t handlers[] = {
         { .uri = "/api/status", .method = HTTP_GET, .handler = status_handler },
-        { .uri = "/api/restart", .method = HTTP_POST, .handler = restart_handler },
+        { .uri = "/api/restart", .method = HTTP_POST, .handler = gated_restart_handler },
     };
 
     for (size_t i = 0; i < sizeof(handlers) / sizeof(handlers[0]); i++) {

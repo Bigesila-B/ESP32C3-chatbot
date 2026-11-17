@@ -493,12 +493,16 @@ static esp_err_t session_delete_handler(httpd_req_t *req)
     return http_server_send_json_response(req, out);
 }
 
+HTTP_SERVER_GATED_HANDLER(session_list_handler)
+HTTP_SERVER_GATED_HANDLER(session_read_handler)
+HTTP_SERVER_GATED_HANDLER(session_delete_handler)
+
 esp_err_t http_server_register_session_routes(httpd_handle_t server)
 {
     const httpd_uri_t handlers[] = {
-        { .uri = "/api/sessions", .method = HTTP_GET, .handler = session_list_handler },
-        { .uri = "/api/session", .method = HTTP_GET, .handler = session_read_handler },
-        { .uri = "/api/session", .method = HTTP_DELETE, .handler = session_delete_handler },
+        { .uri = "/api/sessions", .method = HTTP_GET, .handler = gated_session_list_handler },
+        { .uri = "/api/session", .method = HTTP_GET, .handler = gated_session_read_handler },
+        { .uri = "/api/session", .method = HTTP_DELETE, .handler = gated_session_delete_handler },
     };
 
     for (size_t i = 0; i < sizeof(handlers) / sizeof(handlers[0]); i++) {

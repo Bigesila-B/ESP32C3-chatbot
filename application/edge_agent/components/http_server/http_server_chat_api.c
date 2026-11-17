@@ -133,10 +133,12 @@ static esp_err_t chat_handler(httpd_req_t *req)
     return http_server_send_json_response(req, out);
 }
 
+HTTP_SERVER_GATED_HANDLER(chat_handler)
+
 esp_err_t http_server_register_chat_routes(httpd_handle_t server)
 {
     const httpd_uri_t handlers[] = {
-        { .uri = "/api/chat", .method = HTTP_POST, .handler = chat_handler },
+        { .uri = "/api/chat", .method = HTTP_POST, .handler = gated_chat_handler },
     };
 
     for (size_t i = 0; i < sizeof(handlers) / sizeof(handlers[0]); i++) {

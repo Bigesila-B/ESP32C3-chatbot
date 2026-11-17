@@ -90,6 +90,14 @@ python -m esptool --port COM6 --baud 460800 write-flash 0x0 backup.bin
 
 `idf.py build` 不支持 `-j N`，限制并发要用 `CMAKE_BUILD_PARALLEL_LEVEL` 环境变量。
 
+后台忘记管理密码时，只能擦除 NVS 分区恢复出厂（同时清掉 Wi-Fi 与所有密钥）：
+
+```bash
+python -m esptool --port COM5 erase_region 0xa000 0x6000
+```
+
+新加 `/api/*` 路由时记得两件事：用 `HTTP_SERVER_GATED_HANDLER` 包一层认证，以及核对 `http_server_core.c` 里的 `max_uri_handlers`（当前 24 槽、用了 19 条）。
+
 ## 在别处建构建目录
 
 如果源码放在带中文的路径、需要另建一个纯 ASCII 的编译目录，注意别把生成物一起镜像掉：

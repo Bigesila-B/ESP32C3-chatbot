@@ -152,6 +152,18 @@
   #toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
   #toast.err { background: #7c2626; }
 
+  /* 认证层：未登录时只显示登录卡片，后台内容一律隐藏 */
+  body:not(.authed) > header, body:not(.authed) > .shell { display: none; }
+  #auth-gate { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+  .auth-card {
+    width: 100%; max-width: 380px; background: var(--card);
+    border: 1px solid var(--line); border-radius: 14px; padding: 22px;
+  }
+  .auth-card h1 { margin: 0 0 8px; font-size: 19px; font-weight: 600; }
+  .auth-card .field-note { margin: 0 0 14px; }
+  .clear-secret { margin-top: 6px; font-size: 12px; padding: 5px 10px; }
+  .auth-mini { padding: 5px 10px; font-size: 12px; margin-left: 8px; }
+
   @media (max-width: 720px) {
     .shell { display: block; }
     nav {
@@ -176,9 +188,38 @@
 </head>
 <body>
 
+<div id="auth-gate">
+  <div class="auth-card">
+    <h1 id="auth-title">登录设备后台</h1>
+    <p class="field-note" id="auth-hint">正在读取设备状态…</p>
+    <div class="row">
+      <label>管理密码</label>
+      <input id="auth-password" type="password" maxlength="64" autocomplete="current-password" placeholder="6–64 位">
+    </div>
+    <div class="row" id="auth-confirm-row" hidden>
+      <label>确认密码</label>
+      <input id="auth-confirm" type="password" maxlength="64" autocomplete="new-password">
+    </div>
+    <div id="auth-wifi" hidden>
+      <div class="row">
+        <label>Wi-Fi 名称 <em>可稍后在「网络设置」里填</em></label>
+        <input id="auth-ssid" maxlength="31" autocapitalize="off" autocorrect="off" spellcheck="false">
+      </div>
+      <div class="row">
+        <label>Wi-Fi 密码</label>
+        <input id="auth-wifi-pass" type="password" maxlength="63">
+      </div>
+    </div>
+    <div class="actions"><button id="auth-submit">登录</button></div>
+    <p class="field-note" id="auth-note"></p>
+  </div>
+</div>
+
 <header>
   <b>ESP-Claw C3</b>
   <span id="net">正在读取状态…</span>
+  <button class="ghost auth-mini" id="btn-password">改密码</button>
+  <button class="ghost auth-mini" id="btn-logout">退出</button>
 </header>
 
 <div class="shell">
@@ -465,12 +506,21 @@
   var toastTimer = null;
   var booted = false;
   var chatBusy = false;
+  /* 当前会话的 token，设备重启后自然失效 */
+  var authToken = sessionStorage.getItem("c3_token") || "";
+  var authSetup = false;
   /* 当前会话 id，与设备上的会话文件一一对应 */
   var chatSession = "web";
   var sessionsCache = [];
   var chatEntered = false;
+  /* 这些字段后端只回显 xxx_set 布尔，输入框留空表示「不修改」 */
+  var SECRET_FIELDS = ["llm_api_key", "wifi_password", "ap_password",
+                       "qq_app_secret", "feishu_app_secret", "tg_bot_token",
+                       "wechat_token", "search_brave_key", "search_tavily_key"];
 
-  function $(id) { return document.getElementById(id); }
+  function isSecret(name) { return SECRET_FIELDS.indexOf(name) >= 0; }
+
+  function $ (id) { return document.getElementById(id); }
 
   function toast(text, isError) {
     var box = $("toast");
@@ -481,10 +531,33 @@
   }
 
   async function api(path, options) {
-    var response = await fetch(path, options || { cache: "no-store" });
+    var opts = options || {};
+    var headers = {};
+    Object.keys(opts.headers || {}).forEach(function (key) { headers[key] = opts.headers[key]; });
+    if (authToken) headers["Authorization"] = "Bearer " + authToken;
+
+    var response = await fetch(path, {
+      method: opts.method || "GET",
+      headers: headers,
+      body: opts.body,
+      cache: "no-store"
+    });
     var text = await response.text();
+
+    /* 认证接口自己的 401 是「密码错误」，不能当成登录过期 */
+    if (response.status === 401 && path.indexOf("/api/auth") !== 0) {
+      authToken = "";
+      sessionStorage.removeItem("c3_token");
+      showAuth(true);
+      throw new Error("登录已失效，请重新登录");
+    }
     if (!response.ok) {
-      throw new Error(text || ("HTTP " + response.status));
+      var message = text;
+      try {
+        var parsed = JSON.parse(text);
+        if (parsed && parsed.error) message = parsed.error;
+      } catch (e) { /* 非 JSON 错误体就用原文 */ }
+      throw new Error(message || ("HTTP " + response.status));
     }
     if (!text) return {};
     var type = response.headers.get("content-type") || "";
@@ -492,6 +565,107 @@
       throw new Error("设备返回了非 JSON 响应，接口可能未启用");
     }
     return JSON.parse(text);
+  }
+
+  /* ── 认证 ─────────────────────────────────────────────── */
+
+  function enterApp() {
+    $("auth-gate").style.display = "none";
+    document.body.classList.add("authed");
+    route();
+  }
+
+  function showAuth(configured) {
+    authSetup = !configured;
+    document.body.classList.remove("authed");
+    $("auth-gate").style.display = "flex";
+    $("auth-title").textContent = authSetup ? "首次设置" : "登录设备后台";
+    $("auth-hint").textContent = authSetup
+      ? "设置管理密码后，配置、记忆与会话接口都会受到保护。也可以顺带填好 Wi-Fi。"
+      : "请输入管理密码。设备重启后令牌会失效，需要重新登录。";
+    $("auth-confirm-row").hidden = !authSetup;
+    $("auth-wifi").hidden = !authSetup;
+    $("auth-submit").textContent = authSetup ? "设置并进入" : "登录";
+    $("auth-note").textContent = authSetup
+      ? "密码只以 SHA-256 哈希保存在设备上，不会写进源码或仓库。"
+      : "";
+  }
+
+  async function bootAuth() {
+    try {
+      var info = await api("/api/auth");
+      if (info.authenticated) enterApp();
+      else showAuth(info.configured);
+    } catch (error) {
+      showAuth(true);
+      $("auth-hint").textContent = "无法读取设备状态：" + error.message;
+    }
+  }
+
+  async function submitAuth(button) {
+    var password = $("auth-password").value;
+    if (password.length < 6 || password.length > 64) {
+      toast("密码需 6–64 位", true);
+      return;
+    }
+    if (authSetup && password !== $("auth-confirm").value) {
+      toast("两次输入的密码不一致", true);
+      return;
+    }
+    var body = { action: authSetup ? "setup" : "login", password: password };
+    if (authSetup) {
+      body.wifi_ssid = $("auth-ssid").value.trim();
+      body.wifi_password = $("auth-wifi-pass").value;
+    }
+
+    button.disabled = true;
+    try {
+      var res = await api("/api/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      if (!res.ok || !res.token) throw new Error("设备没有返回令牌");
+      authToken = res.token;
+      sessionStorage.setItem("c3_token", authToken);
+      $("auth-password").value = "";
+      $("auth-confirm").value = "";
+      enterApp();
+    } catch (error) {
+      toast("认证失败：" + error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function closestRow(el) {
+    while (el && !(el.classList && el.classList.contains("row"))) el = el.parentElement;
+    return el;
+  }
+
+  async function clearSecret(name, button) {
+    if (!confirm("确认清除这项已保存的密钥？")) return;
+    button.disabled = true;
+    try {
+      var body = {};
+      body[name] = null;
+      await api("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      var input = closestRow(button).querySelector("input");
+      if (input) {
+        input.value = "";
+        input.placeholder = "未设置";
+      }
+      button.hidden = true;
+      toast("已清除，重启后生效");
+    } catch (error) {
+      toast("清除失败：" + error.message, true);
+    } finally {
+      button.disabled = false;
+    }
   }
 
   async function loadStatus() {
@@ -520,6 +694,24 @@
     fields.forEach(function (name) {
       var input = box.querySelector('[name="' + name + '"]');
       if (!input) return;
+      if (isSecret(name)) {
+        /* 密钥不回显明文，只显示是否已设置；留空提交时后端保持不变 */
+        var set = !!data[name + "_set"];
+        input.value = "";
+        input.placeholder = set ? "已设置，留空保持不变" : "未设置";
+        var row = closestRow(input);
+        var btn = row ? row.querySelector(".clear-secret") : null;
+        if (set && !btn && row) {
+          btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "ghost clear-secret";
+          btn.textContent = "清除已存密钥";
+          btn.addEventListener("click", function () { clearSecret(name, btn); });
+          row.appendChild(btn);
+        }
+        if (btn) btn.hidden = !set;
+        return;
+      }
       input.value = data[name] == null ? "" : data[name];
       if (name === "ap_behavior" && !input.value) input.value = "keep";
     });
@@ -535,7 +727,9 @@
     var body = {};
     (PAGE_FIELDS[page] || []).forEach(function (name) {
       var input = box.querySelector('[name="' + name + '"]');
-      if (input) body[name] = input.value;
+      if (!input) return;
+      if (isSecret(name) && !input.value) return;
+      body[name] = input.value;
     });
     if (page === "llm") {
       /* 两个保存按钮共用同一页字段：数值框留空或填了非数字会让整页 POST 被后端拒绝 */
@@ -867,8 +1061,46 @@
     }
   });
 
-  window.addEventListener("hashchange", route);
-  route();
+  $("auth-submit").addEventListener("click", function () { submitAuth(this); });
+  $("auth-password").addEventListener("keydown", function (event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitAuth($("auth-submit"));
+    }
+  });
+
+  $("btn-password").addEventListener("click", async function () {
+    var oldPw = window.prompt("当前管理密码");
+    if (!oldPw) return;
+    var newPw = window.prompt("新密码（6–64 位）");
+    if (!newPw) return;
+    try {
+      var res = await api("/api/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "change", password: oldPw, new_password: newPw })
+      });
+      if (res.token) {
+        authToken = res.token;
+        sessionStorage.setItem("c3_token", authToken);
+      }
+      toast("密码已更新，请牢记新密码");
+    } catch (error) {
+      toast("修改失败：" + error.message, true);
+    }
+  });
+
+  $("btn-logout").addEventListener("click", function () {
+    authToken = "";
+    sessionStorage.removeItem("c3_token");
+    Object.keys(loaded).forEach(function (key) { loaded[key] = false; });
+    showAuth(true);
+  });
+
+  window.addEventListener("hashchange", function () {
+    if (document.body.classList.contains("authed")) route();
+  });
+  bootAuth();
 })();
 </script>
 </body>

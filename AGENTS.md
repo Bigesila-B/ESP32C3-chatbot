@@ -155,6 +155,30 @@ and `DELETE /api/session`. `POST /api/chat` takes an optional `session` field
 `s_<id>_<hash>.log` under `/fatfs/sessions` — the HTTP layer reverse-parses
 the id from the filename instead of reimplementing the hash.
 
+### Authentication
+
+`http_server_auth.c` owns the admin password (salted SHA-256 in NVS namespace
+`espclaw_auth`, key `pwd_hash`) and an in-memory 16-byte random token. There is
+no factory default password: the first visit must call `POST /api/auth` with
+`action=setup`, which can also save Wi-Fi so provisioning still works.
+
+Every sensitive route is wrapped with `HTTP_SERVER_GATED_HANDLER` inside its
+`*_register_*_routes()` function. **When adding a new `/api/*` handler, wrap
+it too** — this is not a global middleware. Only `/api/status`, `/api/auth`
+and the embedded index page are intentionally public.
+
+Secret config fields use `CONFIG_SECRET_FIELD`: GET returns `<field>_set`,
+POST with an empty string keeps the stored value, and JSON `null` clears it.
+The web console deliberately never submits empty secret fields.
+
+`llm_base_url` is excluded from the runtime hot-update in `main_save_config()`
+on purpose — otherwise anyone reaching `/api/config` could redirect the model
+key to their own host. A changed URL only takes effect after reboot. Keep
+this when touching config save/update code.
+
+Adding a route means updating the `max_uri_handlers` count in
+`http_server_core.c` (24 slots, 19 in use).
+
 ## Common pitfalls
 
 - **Route count**: `http_server_core.c` sets `max_uri_handlers = 20` in the

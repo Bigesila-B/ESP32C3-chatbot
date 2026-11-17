@@ -13,6 +13,7 @@ set(http_server_srcs
     "http_server_status_api.c"
     "http_server_chat_api.c"
     "http_server_session_api.c"
+    "http_server_auth.c"
     "http_server_json.c"
     "http_server_utils.c"
 )
@@ -25,6 +26,9 @@ set(http_server_requires
     claw_utils
     esp_http_server
     heap
+    nvs_flash
+    mbedtls
+    esp_timer
 )
 
 # 记忆管理接口在精简版同样需要，放在 TEXT_ONLY 分支之外
