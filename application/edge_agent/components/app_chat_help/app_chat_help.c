@@ -4,7 +4,6 @@
 #include "app_chat_help.h"
 
 #include <ctype.h>
-#include <errno.h>
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdatomic.h>
@@ -14,7 +13,6 @@
 
 #include "claw_cap.h"
 #include "claw_event_router.h"
-#include "claw_paths.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
 #if CONFIG_APP_CLAW_CAP_MEMORY
@@ -31,22 +29,7 @@
 #define HELP_REPLY_TITLE   "ESP-Claw /help\n"
 #define HELP_PAGE_SIZE     1400
 #define HELP_CAP_USAGE_SIZE 2048
-#define STICKER_COMMAND      "/sticker"
-#define STICKER_CATALOG      "stickers.txt"
-#define STICKER_CATALOG_MAX  (16 * 1024)
-#define STICKER_NAME_MAX     64
-#define STICKER_URL_MAX      1500
-#define STICKER_CDN          "https://cdn.jsdelivr.net/gh/jdecked/twemoji@17.0.3/assets/72x72/"
 #define MCP_LAST_IMAGE_COMMAND "/mcp last-image"
-
-/* Twemoji graphics by Twitter, Inc. and contributors, CC BY 4.0. */
-static const char s_default_stickers[] =
-    "笑哭=" STICKER_CDN "1f602.png\n"
-    "点赞=" STICKER_CDN "1f44d.png\n"
-    "抱抱=" STICKER_CDN "1f917.png\n"
-    "庆祝=" STICKER_CDN "1f389.png\n"
-    "无语=" STICKER_CDN "1f644.png\n"
-    "比心=" STICKER_CDN "1faf6.png\n";
 
 static const char *TAG = "app_chat_help";
 static atomic_bool s_registered;
@@ -170,10 +153,6 @@ static void visit_commands(const claw_event_t *event, help_command_visitor_t vis
         .command = HELP_COMMAND,
         .description = "Show device status and commands",
         .description_zh = "查看设备状态和指令",
-    }, ctx) || !visit(&(help_command_t) {
-        .command = STICKER_COMMAND " [名称]",
-        .description = "List or send stickers from an image host",
-        .description_zh = "查看表情包目录或按名称发送",
     }, ctx)) {
         return;
     }
@@ -193,8 +172,7 @@ static void visit_commands(const claw_event_t *event, help_command_visitor_t vis
     }
     for (size_t i = 0; i < count; ++i) {
         const claw_event_router_rule_t *rule = &rules[i];
-        if (!rule_available(rule, event) || strcmp(rule->match.text, HELP_COMMAND) == 0 ||
-                strcmp(rule->match.text, STICKER_COMMAND) == 0) {
+        if (!rule_available(rule, event) || strcmp(rule->match.text, HELP_COMMAND) == 0) {
             continue;
         }
         const claw_event_router_action_t *first = rule->actions;
@@ -243,35 +221,7 @@ static bool send_help_page(help_text_t *out)
     return out->status == ESP_OK;
 }
 
-static char *load_sticker_catalog(bool *built_in)
-{
-    const char *data_root = claw_paths_get(CLAW_PATH_DATA);
-    char *path = NULL;
-    if (!data_root || asprintf(&path, "%s/" STICKER_CATALOG, data_root) < 0) {
-        return NULL;
-    }
-    FILE *file = fopen(path, "rb");
-    int open_err = errno;
-    free(path);
-    *built_in = !file && open_err == ENOENT;
-    if (!file) {
-        return *built_in ? strdup(s_default_stickers) : NULL;
-    }
-
-    char *catalog = malloc(STICKER_CATALOG_MAX + 1);
-    if (catalog) {
-        size_t size = fread(catalog, 1, STICKER_CATALOG_MAX + 1, file);
-        if (ferror(file) || size > STICKER_CATALOG_MAX || memchr(catalog, '\0', size)) {
-            free(catalog);
-            catalog = NULL;
-        } else {
-            catalog[size] = '\0';
-        }
-    }
-    fclose(file);
-    return catalog;
-}
-
+#if CONFIG_APP_CLAW_CAP_MCP_CLIENT
 static size_t trimmed_length(const char *text)
 {
     size_t len = strlen(text);
@@ -279,17 +229,6 @@ static size_t trimmed_length(const char *text)
         len--;
     }
     return len;
-}
-
-static bool sticker_url_valid(const char *url)
-{
-    if ((strncmp(url, "https://", 8) != 0 && strncmp(url, "http://", 7) != 0) ||
-            strlen(url) > STICKER_URL_MAX || strpbrk(url, "#\\<>\" \t\r\n")) {
-        return false;
-    }
-    const char *host = strstr(url, "://") + 3;
-    size_t host_len = strcspn(host, "/?");
-    return host_len > 0 && !memchr(host, '@', host_len);
 }
 
 static esp_err_t reply_hosted_image(const claw_event_t *event, const char *url, const char *label)
@@ -328,7 +267,6 @@ static esp_err_t reply_hosted_image(const claw_event_t *event, const char *url, 
     return claw_event_router_reply(event, url);
 }
 
-#if CONFIG_APP_CLAW_CAP_MCP_CLIENT
 static esp_err_t reply_mcp_message(const char *channel, const char *chat_id, const char *content, bool image)
 {
     claw_event_t event = { .event_type = "message" };
@@ -339,79 +277,6 @@ static esp_err_t reply_mcp_message(const char *channel, const char *chat_id, con
     return image ? reply_hosted_image(&event, content, "MCP 生成图片") : claw_event_router_reply(&event, content);
 }
 #endif
-
-static esp_err_t send_sticker_reply(const claw_event_t *event, const char *name)
-{
-    bool built_in;
-    char *catalog = load_sticker_catalog(&built_in);
-    if (!catalog) {
-        return claw_event_router_reply(event, "读取表情目录失败，请检查文件管理中的 " STICKER_CATALOG "。");
-    }
-    size_t name_len = trimmed_length(name);
-    help_text_t out = { .event = event };
-    if (name_len == 0) {
-        out.page = calloc(1, HELP_PAGE_SIZE);
-        if (!out.page) {
-            free(catalog);
-            return ESP_ERR_NO_MEM;
-        }
-        append_help(&out, "图床表情包\n发送 /sticker 名称 选一张表情。\n");
-        if (built_in) {
-            append_help(&out, "默认素材 Twemoji · CC BY 4.0\n");
-        }
-    }
-
-    char *start = strncmp(catalog, "\xef\xbb\xbf", 3) == 0 ? catalog + 3 : catalog;
-    char *next = NULL;
-    const char *selected = NULL;
-    bool found = false;
-    for (char *line = strtok_r(start, "\r\n", &next); line; line = strtok_r(NULL, "\r\n", &next)) {
-        while (isspace((unsigned char)*line)) {
-            line++;
-        }
-        char *url = strchr(line, '=');
-        if (*line == '#' || !url) {
-            continue;
-        }
-        *url++ = '\0';
-        line[trimmed_length(line)] = '\0';
-        while (isspace((unsigned char)*url)) {
-            url++;
-        }
-        url[trimmed_length(url)] = '\0';
-        size_t label_len = strlen(line);
-        if (!label_len || label_len > STICKER_NAME_MAX || !sticker_url_valid(url)) {
-            continue;
-        }
-        found = true;
-        if (name_len > 0) {
-            if (name_len == label_len && memcmp(name, line, name_len) == 0) {
-                selected = url;
-                break;
-            }
-        } else if (!append_help(&out, "- %s\n", line)) {
-            if (!send_help_page(&out)) {
-                break;
-            }
-            append_help(&out, "- %s\n", line);
-        }
-    }
-
-    if (name_len > 0) {
-        out.status = selected ? reply_hosted_image(event, selected, "表情包") :
-                     claw_event_router_reply(event, "没有找到这个表情，发送 /sticker 查看列表。");
-    } else {
-        if (!found) {
-            append_help(&out, "表情目录暂无有效条目。\n");
-        }
-        if (out.status == ESP_OK && out.used > 0) {
-            send_help_page(&out);
-        }
-    }
-    free(out.page);
-    free(catalog);
-    return out.status;
-}
 
 static bool append_command(const help_command_t *item, void *ctx)
 {
@@ -588,16 +453,6 @@ static bool handle_chat_command(const claw_event_t *event, esp_err_t *out_status
         return true;
     }
 #endif
-    size_t sticker_len = sizeof(STICKER_COMMAND) - 1;
-    if (strncmp(text, STICKER_COMMAND, sticker_len) == 0 &&
-            (text[sticker_len] == '\0' || isspace((unsigned char)text[sticker_len]))) {
-        text += sticker_len;
-        while (isspace((unsigned char)*text)) {
-            text++;
-        }
-        *out_status = send_sticker_reply(event, text);
-        return true;
-    }
     if (strncmp(text, HELP_COMMAND, sizeof(HELP_COMMAND) - 1) != 0) {
         return false;
     }
