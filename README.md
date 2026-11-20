@@ -56,6 +56,10 @@ How to read it:
 
 `GET /api/netdiag` returns the raw JSON for scripting. The self-test needs roughly 20 KB of heap and answers 503 instead of running when less than 45 KB is free.
 
+## Known issues
+
+**Tool-call turns can still fail on the C3**: the second LLM request of a `web_search` round dies in the TLS handshake with `ESP_ERR_HTTP_CONNECT`. The cause is peak heap pressure (no PSRAM), not the network; plain chat is unaffected. Full symptoms, measurements, ruled-out causes and reproduction steps are in [ISSUE-C3-TOOLCALL-OOM.md](./ISSUE-C3-TOOLCALL-OOM.md).
+
 ## Hardware
 
 - ESP32-C3 with 4 MB flash

@@ -57,6 +57,10 @@ C3 没有 PSRAM，工具调用的那一轮请求会比普通对话多占内存�
 
 七个分区：设备状态、对话、人格设定、长期记忆、对话模型、聊天通道、网络设置。纯手写 HTML 加原生 JS，没有构建步骤，直接打进固件。
 
+## 已知问题
+
+**带工具调用的轮次在 C3 上仍可能失败**：`web_search` 的第二次 LLM 请求会在 TLS 握手阶段报 `ESP_ERR_HTTP_CONNECT`，根因是峰值内存不足（无 PSRAM），不是网络。普通对话不受影响。完整的现象、实测数据、已排除方向和复现步骤见 [ISSUE-C3-TOOLCALL-OOM.md](./ISSUE-C3-TOOLCALL-OOM.md)。
+
 ## 硬件
 
 - ESP32-C3，4 MB Flash
