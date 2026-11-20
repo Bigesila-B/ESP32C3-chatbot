@@ -1,7 +1,8 @@
 idf_component_register(
     SRCS
         "esp_http_client_reuse.c"
-    INCLUDE_DIRS
+        "claw_http_transfer.c"
+    INCLUDE_DIRS "include"
     REQUIRES
         esp_http_client
         freertos

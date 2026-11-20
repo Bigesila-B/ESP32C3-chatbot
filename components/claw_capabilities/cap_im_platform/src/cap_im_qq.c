@@ -22,7 +22,8 @@
 #include "claw_event_publisher.h"
 #include "esp_crt_bundle.h"
 #include "esp_attr.h"
-#include "esp_http_client.h"
+#include "claw_http_transfer.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_websocket_client.h"
@@ -41,7 +42,6 @@ static const char *TAG = "cap_im_qq";
 #define CAP_IM_QQ_WS_CONNECT_GRACE_MS  10000
 #define CAP_IM_QQ_RECONNECT_DELAY_MS   5000
 #define CAP_IM_QQ_MAX_MSG_LEN          1500
-#define CAP_IM_QQ_HTTP_RESP_INIT       2048
 #define CAP_IM_QQ_WS_TASK_STACK        6144
 #define CAP_IM_QQ_WS_CLIENT_STACK      8192
 #define CAP_IM_QQ_WS_PRIO              5
@@ -67,6 +67,7 @@ typedef struct {
     char *buf;
     size_t len;
     size_t cap;
+    esp_err_t error;
 } cap_im_qq_http_resp_t;
 
 typedef struct {
@@ -289,6 +290,9 @@ static esp_err_t cap_im_qq_http_event_handler(esp_http_client_event_t *event)
         return ESP_OK;
     }
 
+    if (resp->error != ESP_OK) {
+        return resp->error;
+    }
     if (resp->len + (size_t)event->data_len + 1 > resp->cap) {
         char *tmp = NULL;
         size_t new_cap = resp->cap * 2;
@@ -299,7 +303,8 @@ static esp_err_t cap_im_qq_http_event_handler(esp_http_client_event_t *event)
 
         tmp = realloc(resp->buf, new_cap);
         if (!tmp) {
-            return ESP_ERR_NO_MEM;
+            resp->error = ESP_ERR_NO_MEM;
+            return resp->error;
         }
         resp->buf = tmp;
         resp->cap = new_cap;
@@ -417,13 +422,6 @@ static esp_err_t cap_im_qq_get_access_token(void)
         return ESP_ERR_NO_MEM;
     }
 
-    resp.buf = calloc(1, CAP_IM_QQ_HTTP_RESP_INIT);
-    resp.cap = CAP_IM_QQ_HTTP_RESP_INIT;
-    if (!resp.buf) {
-        free(json_str);
-        return ESP_ERR_NO_MEM;
-    }
-
     config.url = CAP_IM_QQ_TOKEN_URL;
     config.event_handler = cap_im_qq_http_event_handler;
     config.user_data = &resp;
@@ -451,7 +449,10 @@ static esp_err_t cap_im_qq_get_access_token(void)
     esp_http_client_set_header(client, "Content-Type", "application/json");
     esp_http_client_set_post_field(client, json_str, strlen(json_str));
 
-    err = esp_http_client_perform(client);
+    err = claw_http_perform(client);
+    if (resp.error != ESP_OK) {
+        err = resp.error;
+    }
     status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
     free(json_str);
@@ -515,12 +516,6 @@ retry:
         return err;
     }
 
-    resp.buf = calloc(1, CAP_IM_QQ_HTTP_RESP_INIT);
-    resp.cap = CAP_IM_QQ_HTTP_RESP_INIT;
-    if (!resp.buf) {
-        return ESP_ERR_NO_MEM;
-    }
-
     config.url = CAP_IM_QQ_GATEWAY_URL;
     config.event_handler = cap_im_qq_http_event_handler;
     config.user_data = &resp;
@@ -549,7 +544,10 @@ retry:
     }
 
     esp_http_client_set_header(client, "Authorization", auth);
-    err = esp_http_client_perform(client);
+    err = claw_http_perform(client);
+    if (resp.error != ESP_OK) {
+        err = resp.error;
+    }
     status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
     free(auth);
@@ -1058,6 +1056,8 @@ static void cap_im_qq_process_frame(const char *frame, size_t frame_len)
         s_qq.ws_should_reconnect = true;
         break;
     case CAP_IM_QQ_WS_OP_HEARTBEAT_ACK:
+        ESP_LOGI(TAG, "QQ heartbeat acknowledged");
+        break;
     default:
         break;
     }
@@ -1105,6 +1105,9 @@ static void cap_im_qq_ws_event_handler(void *arg,
         return;
     }
     if (event_id == WEBSOCKET_EVENT_DISCONNECTED) {
+        ESP_LOGW(TAG, "QQ gateway disconnected; internal heap=%u largest=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
         s_qq.ws_connected = false;
         s_qq.ws_identify_pending = false;
         s_qq.ws_should_reconnect = true;
@@ -1156,15 +1159,13 @@ retry:
     }
 
     url = calloc(1, (size_t)needed + 1);
-    resp.buf = calloc(1, 4096);
     auth = cap_im_qq_make_auth_header();
-    if (!url || !resp.buf || !auth) {
+    if (!url || !auth) {
         free(url);
         free(resp.buf);
         free(auth);
         return ESP_ERR_NO_MEM;
     }
-    resp.cap = 4096;
     snprintf(url, (size_t)needed + 1, "%s%s", CAP_IM_QQ_API_BASE, path);
 
     config.url = url;
@@ -1193,7 +1194,10 @@ retry:
         esp_http_client_set_post_field(client, body_json, strlen(body_json));
     }
 
-    err = esp_http_client_perform(client);
+    err = claw_http_perform(client);
+    if (resp.error != ESP_OK) {
+        err = resp.error;
+    }
     status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
     free(url);
@@ -1234,7 +1238,10 @@ retry:
     }
 
     if (out_response) {
-        *out_response = resp.buf;
+        *out_response = resp.buf ? resp.buf : strdup("");
+        if (!*out_response) {
+            return ESP_ERR_NO_MEM;
+        }
     } else {
         free(resp.buf);
     }

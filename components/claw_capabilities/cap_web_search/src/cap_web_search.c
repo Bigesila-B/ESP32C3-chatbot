@@ -13,7 +13,7 @@
 #include "cJSON.h"
 #include "claw_cap.h"
 #include "esp_crt_bundle.h"
-#include "esp_http_client.h"
+#include "claw_http_transfer.h"
 #include "esp_log.h"
 
 static const char *TAG = "cap_web_search";
@@ -343,7 +343,7 @@ static esp_err_t cap_web_search_brave_direct(const char *url, cap_web_search_buf
 
     esp_http_client_set_header(client, "Accept", "application/json");
     esp_http_client_set_header(client, "X-Subscription-Token", s_search.brave_key);
-    err = esp_http_client_perform(client);
+    err = claw_http_perform(client);
     status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
     if (err != ESP_OK) {
@@ -394,7 +394,7 @@ static esp_err_t cap_web_search_tavily_direct(const char *query, cap_web_search_
     esp_http_client_set_header(client, "Content-Type", "application/json");
     esp_http_client_set_header(client, "Authorization", auth);
     esp_http_client_set_post_field(client, payload, strlen(payload));
-    err = esp_http_client_perform(client);
+    err = claw_http_perform(client);
     status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
     free(payload);

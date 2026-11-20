@@ -12,7 +12,7 @@
 
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
-#include "esp_http_client.h"
+#include "claw_http_transfer.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
@@ -392,7 +392,7 @@ esp_err_t claw_llm_http_post_json(const claw_llm_http_json_request_t *request,
      * 上一次失败的缓冲已经释放，第二次通常就能成功；已经收到数据则不重试，
      * 避免把半截请求重复发出去。 */
     for (int attempt = 0; ; attempt++) {
-        err = esp_http_client_perform(client);
+        err = claw_http_perform(client);
         if (request_ctx.receive_error != ESP_OK) {
             err = request_ctx.receive_error;
             *out_error_message = dup_printf("Out of memory buffering HTTP response");

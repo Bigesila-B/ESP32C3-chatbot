@@ -151,9 +151,12 @@ static esp_err_t session_dir_path(char *out, size_t out_size)
     return http_server_resolve_storage_path(SESSION_DIR_REL, out, out_size);
 }
 
-static void session_entry_path(const char *file, char *out, size_t out_size)
+static bool session_entry_path(const char *file, char *out, size_t out_size)
 {
-    snprintf(out, out_size, "%s%s/%s", http_server_ctx()->storage_base_path, SESSION_DIR_REL, file);
+    if (session_dir_path(out, out_size) != ESP_OK) {
+        return false;
+    }
+    return strlcat(out, "/", out_size) < out_size && strlcat(out, file, out_size) < out_size;
 }
 
 /*
@@ -249,8 +252,7 @@ static void session_collect_entries(session_entry_t *list, size_t *count)
             continue;
         }
         strlcpy(item.file, entry->d_name, sizeof(item.file));
-        session_entry_path(item.file, full_path, sizeof(full_path));
-        if (stat(full_path, &st) != 0) {
+        if (!session_entry_path(item.file, full_path, sizeof(full_path)) || stat(full_path, &st) != 0) {
             continue;
         }
         item.updated = (long long)st.st_mtime;
@@ -329,8 +331,7 @@ static esp_err_t session_find_file(const char *id, char *out, size_t out_size)
         }
         /* 哈希冲突到同名 id 的概率可以忽略，命中即用 */
         if (strcmp(parsed, id) == 0) {
-            session_entry_path(entry->d_name, out, out_size);
-            err = ESP_OK;
+            err = session_entry_path(entry->d_name, out, out_size) ? ESP_OK : ESP_ERR_INVALID_SIZE;
             break;
         }
     }
