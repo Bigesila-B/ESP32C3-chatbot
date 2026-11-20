@@ -165,6 +165,15 @@ the id from the filename instead of reimplementing the hash.
   16 KB made handshakes fail with `Dynamic Impl: alloc(...) failed` once the
   request body, persona and tool list were live at the same time. 4 KB is too
   small — the certificate chain no longer fits and every HTTPS call fails.
+- **Do not copy the request body**: `claw_llm_http_transport.c` validates UTF-8
+  in place and only allocates a sanitized copy when the body is actually
+  invalid. The previous unconditional `calloc(len + 1)` doubled an 8 KB request
+  at the exact moment mbedtls needed its TX record, which is what produced
+  `ESP_ERR_HTTP_WRITE_DATA` on the device.
+- **TLS send record**: `CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=2048` keeps the
+  per-record TX allocation around 2.4 KB instead of 4.4 KB. The body is split
+  across more records; servers do not care, and the smaller block is far more
+  likely to find a contiguous slot on a fragmented heap.
 - **Single-flight chat**: `http_server_chat_api.c` holds a busy flag for the
   whole model call. `HTTP_CHAT_REPLY_MS` must stay above the configured LLM
   timeout (default 120 s); otherwise the handler returns, the flag clears while

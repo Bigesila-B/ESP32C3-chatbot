@@ -20,9 +20,9 @@ static const char *TAG = "cap_web_search";
 
 /* C3 没有 PSRAM：搜索响应是整块收进堆再解析的，缓冲区按实测响应体积取 12 KB，
  * 结果条数也从 5 降到 3，避免与 LLM 的 TLS 会话叠加时把堆挤爆。 */
-#define CAP_WEB_SEARCH_BUF_SIZE     (12 * 1024)
+#define CAP_WEB_SEARCH_BUF_SIZE     (8 * 1024)
 /* 响应再长也不能无限 realloc：C3 无 PSRAM，此时 LLM 的 TLS 会话可能仍占着堆 */
-#define CAP_WEB_SEARCH_BUF_MAX      (16 * 1024)
+#define CAP_WEB_SEARCH_BUF_MAX      (12 * 1024)
 #define CAP_WEB_SEARCH_RESULT_COUNT 3
 
 typedef enum {
@@ -164,7 +164,9 @@ static size_t cap_web_search_utf8_char_len(const unsigned char *p)
  * 200 字节（约 60 个汉字）足够模型判断这条结果是否相关。 */
 static void cap_web_search_excerpt(const char *src, char *dst, size_t dst_size)
 {
-    const size_t limit = 200;
+    /* 摘要只用来让模型判断相关性，140 字节（约 45 个汉字）足够；
+     * 结果会再进一次模型请求，这里省下的每个字节都要乘以二。 */
+    const size_t limit = 140;
     size_t off = 0;
 
     dst[0] = '\0';
@@ -308,7 +310,7 @@ static esp_err_t cap_web_search_brave_direct(const char *url, cap_web_search_buf
         .event_handler = cap_web_search_http_event_handler,
         .user_data = buf,
         .timeout_ms = 15000,
-        .buffer_size = 4096,
+        .buffer_size = 2048,
         .crt_bundle_attach = esp_crt_bundle_attach,
 #ifdef CONFIG_HTTP_REUSE_ENABLE
         .keep_alive_enable = true,
@@ -347,7 +349,7 @@ static esp_err_t cap_web_search_tavily_direct(const char *query, cap_web_search_
         .event_handler = cap_web_search_http_event_handler,
         .user_data = buf,
         .timeout_ms = 15000,
-        .buffer_size = 4096,
+        .buffer_size = 2048,
         .crt_bundle_attach = esp_crt_bundle_attach,
 #ifdef CONFIG_HTTP_REUSE_ENABLE
         .keep_alive_enable = true,

@@ -15,6 +15,10 @@ CONFIG_MBEDTLS_DYNAMIC_FREE_CA_CERT=y
 # 握手阶段会出现 mbedtls "alloc(...) failed"。实测 8 KB 能收下当前服务商的
 # 证书链，再降到 4 KB 会握不上（证书链塞不下），所以 8 KB 是这里的安全下限。
 CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=8192
+# 发送记录默认 4 KB，对应 mbedtls 每条约 4.4 KB 的临时缓冲；C3 在握手后
+# 写请求时常卡在这个尺寸上（alloc(4437) failed）。降到 2 KB 后请求体分多条
+# 记录发出，对端无感，峰值省下约 2 KB。
+CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=2048
 CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
 
 CONFIG_APP_CLAW_TEXT_ONLY=y

@@ -82,7 +82,7 @@ python -m esptool --port COM6 --baud 460800 write-flash 0x0 backup.bin
 | gcc/ccache 长时间停在同一个 obj，CPU 归零 | ccache 并发冲突 | `CMAKE_BUILD_PARALLEL_LEVEL=1` 单线程编译 |
 | 组件重装被 `safe-delete` 拦截 | 单次删除文件数超过阈值 | 用 `Move-Item` 把目录挪到隔离区，让组件管理器重新下载 |
 | 启动即 abort，日志里有 `ESP_ERR_HTTPD_HANDLERS_FULL` | `max_uri_handlers` 小于实际注册的路由数 | 改 `http_server_core.c` 里的槽位数，目前 TEXT_ONLY 分支为 24（注册 19 条） |
-| 握手阶段反复 `Dynamic Impl: alloc(4~5 KB) failed`，请求结束后堆又回到 70 KB | TLS 峰值内存不够，不是信号问题 | `CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN` 保持 8192：16 KB 峰值撑不住，4 KB 又收不下证书链 |
+| 握手/写请求反复 `Dynamic Impl: alloc(4~5 KB) failed`，请求结束后堆又回到 70 KB | TLS 峰值内存不够，不是信号问题 | `IN_CONTENT_LEN` 保持 8192（16 KB 撑不住、4 KB 收不下证书链），`OUT_CONTENT_LEN` 保持 2048；同时不要恢复「整份复制请求体做 UTF-8 清洗」的写法 |
 | 网页整体打不开但 `ping` 正常 | 模型请求把堆吃光，httpd 分不到内存 | 等 LLM 120 s 超时或重启；`/api/chat` 已有单实例保护，不要再并发压测 |
 | `esp_console.h: No such file` | `CONFIG_APP_CLAW_TEXT_ONLY=y` 时没有 console 组件 | `cap_im_platform/CMakeLists.txt` 里用 `if(NOT CONFIG_APP_CLAW_TEXT_ONLY)` 排除 `cmd_cap_im_*.c` |
 | 组件被判 unused，触发批量删除 | 组件管理器认为依赖未使用 | 在 `main/idf_component.yml` 里显式声明该依赖 |

@@ -11,8 +11,10 @@
 #include <string.h>
 
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_system.h"
 
 static const char *TAG = "llm_http";
 
@@ -123,6 +125,48 @@ static char *sanitize_utf8_body_copy(const char *body)
 
     sanitized[dst] = '\0';
     return sanitized;
+}
+
+/* 只做校验、不改写。请求体绝大多数由 cJSON 生成，本身就是合法 UTF-8；
+ * 这种情况下直接复用原缓冲，免掉一份和请求体等大的拷贝 —— C3 上这是
+ * 8~10 KB 的峰值，正是握手/写请求时 mbedtls 分配失败的主要来源。 */
+static bool utf8_body_is_valid(const char *body)
+{
+    size_t i = 0;
+
+    if (!body) {
+        return false;
+    }
+    while (body[i]) {
+        unsigned char c = (unsigned char)body[i];
+
+        if (c < 0x80) {
+            i++;
+        } else if (c >= 0xC2 && c <= 0xDF) {
+            if (!body[i + 1] || ((unsigned char)body[i + 1] & 0xC0) != 0x80) {
+                return false;
+            }
+            i += 2;
+        } else if (c >= 0xE0 && c <= 0xEF) {
+            if (!body[i + 1] || !body[i + 2] ||
+                    ((unsigned char)body[i + 1] & 0xC0) != 0x80 ||
+                    ((unsigned char)body[i + 2] & 0xC0) != 0x80) {
+                return false;
+            }
+            i += 3;
+        } else if (c >= 0xF0 && c <= 0xF4) {
+            if (!body[i + 1] || !body[i + 2] || !body[i + 3] ||
+                    ((unsigned char)body[i + 1] & 0xC0) != 0x80 ||
+                    ((unsigned char)body[i + 2] & 0xC0) != 0x80 ||
+                    ((unsigned char)body[i + 3] & 0xC0) != 0x80) {
+                return false;
+            }
+            i += 4;
+        } else {
+            return false;
+        }
+    }
+    return true;
 }
 
 static esp_err_t response_buffer_init(response_buffer_t *buffer)
@@ -274,6 +318,7 @@ esp_err_t claw_llm_http_post_json(const claw_llm_http_json_request_t *request,
     esp_http_client_handle_t client = NULL;
     char *auth_header_value = NULL;
     char *sanitized_body = NULL;
+    const char *body_to_send = NULL;
     int status_code = 0;
     esp_err_t err;
 
@@ -287,11 +332,16 @@ esp_err_t claw_llm_http_post_json(const claw_llm_http_json_request_t *request,
         return ESP_ERR_INVALID_ARG;
     }
 
-    sanitized_body = sanitize_utf8_body_copy(request->body);
-    if (!sanitized_body) {
-        *out_error_message = dup_printf("Out of memory sanitizing HTTP request body");
-        ESP_LOGE(TAG, "OOM sanitizing HTTP request body");
-        return ESP_ERR_NO_MEM;
+    if (utf8_body_is_valid(request->body)) {
+        body_to_send = request->body;
+    } else {
+        sanitized_body = sanitize_utf8_body_copy(request->body);
+        if (!sanitized_body) {
+            *out_error_message = dup_printf("Out of memory sanitizing HTTP request body");
+            ESP_LOGE(TAG, "OOM sanitizing HTTP request body");
+            return ESP_ERR_NO_MEM;
+        }
+        body_to_send = sanitized_body;
     }
 
     err = response_buffer_init(&buffer);
@@ -307,8 +357,10 @@ esp_err_t claw_llm_http_post_json(const claw_llm_http_json_request_t *request,
     config.event_handler = http_event_handler;
     config.user_data = &request_ctx;
     config.timeout_ms = request->timeout_ms;
-    config.buffer_size = 4096;
-    config.buffer_size_tx = 4096;
+    /* C3 上没有 PSRAM：缓冲从 4 KB 降到 2 KB，少 4 KB 峰值；
+     * 响应体由事件回调分块累积，不依赖单次读取长度。 */
+    config.buffer_size = 2048;
+    config.buffer_size_tx = 2048;
     config.crt_bundle_attach = esp_crt_bundle_attach;
 #ifdef CONFIG_HTTP_REUSE_ENABLE
     config.keep_alive_enable = true;
@@ -340,9 +392,14 @@ esp_err_t claw_llm_http_post_json(const claw_llm_http_json_request_t *request,
             esp_http_client_set_header(client, header->name, header->value);
         }
     }
-    esp_http_client_set_post_field(client, sanitized_body, (int)strlen(sanitized_body));
+    esp_http_client_set_post_field(client, body_to_send, (int)strlen(body_to_send));
 
-    ESP_LOGD(TAG, "POST %s", request->url);
+    /* 出现写失败时靠这一行就能判断是不是内存问题：body 大小 + 当前可用堆 */
+    ESP_LOGI(TAG, "POST %s body=%u free_heap=%u largest=%u",
+             request->url,
+             (unsigned)strlen(body_to_send),
+             (unsigned)esp_get_free_heap_size(),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
     err = esp_http_client_perform(client);
     if (err != ESP_OK) {
         if (abort_requested(&request_ctx)) {
