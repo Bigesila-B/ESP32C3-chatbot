@@ -135,6 +135,7 @@ esp_err_t http_server_stop(void)
         return ESP_OK;
     }
 
+    http_server_chat_drain();
     esp_err_t err = httpd_stop(s_ctx.server);
     if (err == ESP_OK) {
         s_ctx.server = NULL;

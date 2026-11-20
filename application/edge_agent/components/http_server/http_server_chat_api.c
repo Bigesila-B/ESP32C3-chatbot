@@ -4,13 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <ctype.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "app_claw.h"
 #include "claw_core.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "http_server_priv.h"
+#include "lwip/sockets.h"
 
 static const char *TAG = "http_chat";
 
@@ -29,7 +33,15 @@ static const char *TAG = "http_chat";
 /* C3 只有几十 KB 堆，一次对话在模型返回前会一直占着 TLS 缓冲和请求上下文。
  * 上一轮还没收尾时又进来一条，就会把堆吃光，之后连 QQ 通道都握手失败。
  * 所以同一时刻只放一个请求进主链路，其余直接返回 409。 */
-static bool s_chat_busy;
+#define HTTP_CHAT_WORKER_STACK 4096
+
+static atomic_bool s_chat_busy;
+static atomic_bool s_chat_stopping;
+
+typedef struct {
+    httpd_req_t *req;
+    cJSON *body;
+} http_chat_job_t;
 
 /* 会话 id 与 claw_memory 的命名规则保持一致：字母数字、下划线、短横线 */
 static bool chat_session_id_valid(const char *id)
@@ -72,17 +84,13 @@ static esp_err_t chat_busy_response(httpd_req_t *req)
     return http_server_send_json_response(req, out);
 }
 
-static esp_err_t chat_dispatch(httpd_req_t *req)
+static esp_err_t chat_dispatch(httpd_req_t *req, cJSON *root)
 {
     claw_core_handle_t core = app_claw_get_core();
     if (!core) {
+        cJSON_Delete(root);
         ESP_LOGE(TAG, "core not ready");
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Agent not ready");
-    }
-
-    cJSON *root = NULL;
-    if (http_server_parse_json_body(req, &root) != ESP_OK || !root) {
-        return chat_bad_request(req, "Invalid JSON body");
     }
 
     const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "message"));
@@ -154,25 +162,64 @@ static esp_err_t chat_dispatch(httpd_req_t *req)
     return http_server_send_json_response(req, out);
 }
 
-/* 进入主链路前抢占用标记；主链路内部的早退都走 chat_dispatch 的返回值，
- * 标记只在最外层释放，不会漏。 */
+static void chat_worker(void *arg)
+{
+    http_chat_job_t *job = arg;
+    httpd_req_t *req = job->req;
+    cJSON *body = job->body;
+    free(job);
+
+    if (chat_dispatch(req, body) != ESP_OK) {
+        shutdown(httpd_req_to_sockfd(req), SHUT_RDWR);
+    }
+    httpd_req_async_handler_complete(req);
+    atomic_store(&s_chat_busy, false);
+    vTaskDelete(NULL);
+}
+
+/* Read the POST on the server thread, then let it serve status and other
+ * sockets while one worker waits for the model. */
 static esp_err_t chat_handler(httpd_req_t *req)
 {
-    esp_err_t err;
-
-    if (s_chat_busy) {
-        ESP_LOGW(TAG, "chat busy, rejecting request");
+    if (atomic_exchange(&s_chat_busy, true)) {
+        return chat_busy_response(req);
+    }
+    if (atomic_load(&s_chat_stopping)) {
+        atomic_store(&s_chat_busy, false);
         return chat_busy_response(req);
     }
 
-    s_chat_busy = true;
-    err = chat_dispatch(req);
-    s_chat_busy = false;
-    return err;
+    cJSON *body = NULL;
+    if (http_server_parse_json_body(req, &body) != ESP_OK || !body) {
+        atomic_store(&s_chat_busy, false);
+        return chat_bad_request(req, "Invalid JSON body");
+    }
+    http_chat_job_t *job = malloc(sizeof(*job));
+    if (job && httpd_req_async_handler_begin(req, &job->req) == ESP_OK) {
+        job->body = body;
+        if (xTaskCreate(chat_worker, "web_chat", HTTP_CHAT_WORKER_STACK, job,
+                        tskIDLE_PRIORITY + 2, NULL) == pdPASS) {
+            return ESP_OK;
+        }
+        httpd_req_async_handler_complete(job->req);
+    }
+    cJSON_Delete(body);
+    free(job);
+    atomic_store(&s_chat_busy, false);
+    return httpd_resp_send_500(req);
+}
+
+void http_server_chat_drain(void)
+{
+    atomic_store(&s_chat_stopping, true);
+    while (atomic_load(&s_chat_busy)) {
+        vTaskDelay(1);
+    }
 }
 
 esp_err_t http_server_register_chat_routes(httpd_handle_t server)
 {
+    atomic_store(&s_chat_stopping, false);
     const httpd_uri_t handlers[] = {
         { .uri = "/api/chat", .method = HTTP_POST, .handler = chat_handler },
     };

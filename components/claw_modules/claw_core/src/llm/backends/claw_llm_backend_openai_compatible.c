@@ -212,71 +212,57 @@ static esp_err_t build_chat_body(const openai_compatible_backend_ctx_t *ctx,
                                  char **out_post_data,
                                  char **out_error_message)
 {
-    cJSON *body = NULL;
+    esp_err_t err = ESP_ERR_NO_MEM;
+    cJSON *body = cJSON_CreateObject();
     cJSON *messages = NULL;
     cJSON *system_msg = NULL;
+    cJSON *content = NULL;
     cJSON *item;
-    char *post_data = NULL;
 
-    body = cJSON_CreateObject();
-    messages = cJSON_CreateArray();
-    system_msg = cJSON_CreateObject();
-    if (!body || !messages || !system_msg) {
-        *out_error_message = dup_printf("Out of memory building request");
-        cJSON_Delete(body);
-        cJSON_Delete(messages);
-        cJSON_Delete(system_msg);
-        return ESP_ERR_NO_MEM;
+    if (!body || !cJSON_AddStringToObject(body, "model", ctx->model) ||
+            !cJSON_AddNumberToObject(body, profile->max_tokens_field, ctx->max_tokens) ||
+            !(messages = cJSON_AddArrayToObject(body, "messages")) ||
+            !(system_msg = cJSON_CreateObject())) {
+        goto done;
     }
-
-    cJSON_AddStringToObject(body, "model", ctx->model);
-    cJSON_AddNumberToObject(body, profile->max_tokens_field, ctx->max_tokens);
-
-    cJSON_AddStringToObject(system_msg, "role", "system");
-    cJSON_AddStringToObject(system_msg, "content", request->system_prompt);
+    /* The request owns the prompt and message trees until printing finishes. */
     cJSON_AddItemToArray(messages, system_msg);
-    system_msg = NULL;
-
-    cJSON_ArrayForEach(item, request->messages) {
-        cJSON *dup = cJSON_Duplicate(item, true);
-        if (!dup) {
-            *out_error_message = dup_printf("Out of memory copying messages");
-            cJSON_Delete(body);
-            cJSON_Delete(messages);
-            return ESP_ERR_NO_MEM;
-        }
-        cJSON_AddItemToArray(messages, dup);
+    if (!cJSON_AddStringToObject(system_msg, "role", "system") ||
+            !(content = cJSON_CreateStringReference(request->system_prompt))) {
+        goto done;
     }
-
-    cJSON_AddItemToObject(body, "messages", messages);
-    messages = NULL;
-
+    cJSON_AddItemToObjectCS(system_msg, "content", content);
+    cJSON_ArrayForEach(item, request->messages) {
+        if (!cJSON_AddItemReferenceToArray(messages, item)) {
+            goto done;
+        }
+    }
     if (request->tools_json && request->tools_json[0]) {
         if (!profile->supports_tools) {
-            cJSON_Delete(body);
             *out_error_message = dup_printf("Selected backend does not support tool calls");
-            return ESP_ERR_NOT_SUPPORTED;
+            err = ESP_ERR_NOT_SUPPORTED;
+            goto done;
         }
         cJSON *tools = cJSON_Parse(request->tools_json);
-
-        if (!tools || !cJSON_IsArray(tools)) {
+        if (!cJSON_IsArray(tools)) {
             cJSON_Delete(tools);
-            cJSON_Delete(body);
             *out_error_message = dup_printf("Invalid tools JSON");
-            return ESP_ERR_INVALID_ARG;
+            err = ESP_ERR_INVALID_ARG;
+            goto done;
         }
-        cJSON_AddItemToObject(body, "tools", tools);
+        cJSON_AddItemToObjectCS(body, "tools", tools);
+    }
+    *out_post_data = cJSON_PrintUnformatted(body);
+    if (*out_post_data) {
+        err = ESP_OK;
     }
 
-    post_data = cJSON_PrintUnformatted(body);
+done:
     cJSON_Delete(body);
-    if (!post_data) {
-        *out_error_message = dup_printf("Out of memory serializing request");
-        return ESP_ERR_NO_MEM;
+    if (err == ESP_ERR_NO_MEM) {
+        *out_error_message = dup_printf("Out of memory building LLM request");
     }
-
-    *out_post_data = post_data;
-    return ESP_OK;
+    return err;
 }
 
 static esp_err_t openai_compatible_init(const claw_llm_runtime_config_t *config,
@@ -353,6 +339,7 @@ static esp_err_t openai_compatible_chat(void *backend_ctx,
     }
 
     err = build_chat_body(ctx, profile, request, &post_data, out_error_message);
+    claw_llm_owned_inputs_clear(request->owned_inputs);
     if (err != ESP_OK) {
         return err;
     }

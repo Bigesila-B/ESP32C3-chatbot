@@ -56,6 +56,7 @@ esp_err_t http_server_register_netdiag_routes(httpd_handle_t server);
 #if CONFIG_APP_CLAW_CAP_MEMORY
 esp_err_t http_server_register_memory_routes(httpd_handle_t server);
 #endif
+void http_server_chat_drain(void);
 esp_err_t http_server_register_chat_routes(httpd_handle_t server);
 esp_err_t http_server_register_session_routes(httpd_handle_t server);
 esp_err_t http_server_register_chat_help_routes(httpd_handle_t server);

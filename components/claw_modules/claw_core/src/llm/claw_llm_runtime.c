@@ -201,6 +201,16 @@ void claw_llm_runtime_deinit(claw_llm_runtime_t *runtime)
     free(runtime);
 }
 
+void claw_llm_owned_inputs_clear(claw_llm_owned_inputs_t *inputs)
+{
+    if (inputs) {
+        free(inputs->system_prompt);
+        cJSON_Delete(inputs->messages);
+        free(inputs->tools_json);
+        *inputs = (claw_llm_owned_inputs_t){0};
+    }
+}
+
 void claw_llm_response_free(claw_llm_response_t *response)
 {
     size_t i;

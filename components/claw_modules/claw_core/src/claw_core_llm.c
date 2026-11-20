@@ -178,9 +178,7 @@ static esp_err_t claw_core_llm_ensure_runtime_locked(claw_core_handle_t core,
 }
 
 esp_err_t claw_core_llm_chat_messages(claw_core_handle_t core,
-                                      const char *system_prompt,
-                                      cJSON *messages,
-                                      const char *tools_json,
+                                      claw_llm_owned_inputs_t *inputs,
                                       claw_core_llm_response_t *out_response,
                                       char **out_error_message)
 {
@@ -196,21 +194,22 @@ esp_err_t claw_core_llm_chat_messages(claw_core_handle_t core,
         ESP_LOGE(TAG, "chat_messages: runtime is not initialized");
         return ESP_ERR_INVALID_STATE;
     }
-    if (!system_prompt || !messages || !out_response || !out_error_message || !cJSON_IsArray(messages)) {
+    if (!inputs || !inputs->system_prompt || !cJSON_IsArray(inputs->messages) || !out_response || !out_error_message) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    request.system_prompt = system_prompt;
-    request.messages = messages;
-    request.tools_json = tools_json;
+    request.system_prompt = inputs->system_prompt;
+    request.messages = inputs->messages;
+    request.tools_json = inputs->tools_json;
+    request.owned_inputs = inputs;
     request.abort_flag = &core->inflight_abort;
 
 #if CLAW_CORE_LOG_FULL_LLM_REQUEST
-    messages_json = cJSON_PrintUnformatted(messages);
+    messages_json = cJSON_PrintUnformatted(request.messages);
     if (messages_json) {
-        ESP_LOGI(TAG, "llm_request system_prompt=%s", system_prompt);
+        ESP_LOGI(TAG, "llm_request system_prompt=%s", request.system_prompt);
         ESP_LOGI(TAG, "llm_request messages=%s", messages_json);
-        ESP_LOGI(TAG, "llm_request tools=%s", tools_json ? tools_json : "[]");
+        ESP_LOGI(TAG, "llm_request tools=%s", request.tools_json ? request.tools_json : "[]");
         free(messages_json);
     } else {
         ESP_LOGE(TAG, "failed to render full LLM request messages");

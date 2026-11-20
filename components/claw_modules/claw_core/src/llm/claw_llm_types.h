@@ -76,11 +76,24 @@ typedef struct {
     size_t tool_call_count;
 } claw_llm_response_t;
 
+/* Per-iteration inputs built by the worker. Other runtime callers may borrow
+ * strings or message trees and leave owned_inputs NULL. */
+typedef struct {
+    char *system_prompt;
+    cJSON *messages;
+    char *tools_json;
+} claw_llm_owned_inputs_t;
+
+void claw_llm_owned_inputs_clear(claw_llm_owned_inputs_t *inputs);
+
 typedef struct {
     const char *system_prompt;
     cJSON *messages;
     const char *tools_json;
     volatile bool *abort_flag;
+    /* A synchronous backend may release these after serializing all three
+     * borrowed fields above. The worker clears any remaining inputs on return. */
+    claw_llm_owned_inputs_t *owned_inputs;
 } claw_llm_chat_request_t;
 
 typedef struct {

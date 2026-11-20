@@ -30,9 +30,7 @@ esp_err_t claw_core_llm_init(const claw_core_llm_config_t *config,
                              claw_llm_runtime_t **out_runtime,
                              char **out_error_message);
 esp_err_t claw_core_llm_chat_messages(claw_core_handle_t core,
-                                      const char *system_prompt,
-                                      cJSON *messages,
-                                      const char *tools_json,
+                                      claw_llm_owned_inputs_t *inputs,
                                       claw_core_llm_response_t *out_response,
                                       char **out_error_message);
 esp_err_t claw_core_llm_infer_media(claw_core_handle_t core,

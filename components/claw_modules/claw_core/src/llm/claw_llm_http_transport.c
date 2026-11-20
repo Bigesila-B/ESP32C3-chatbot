@@ -31,6 +31,7 @@ typedef struct {
 typedef struct {
     response_buffer_t *buffer;
     volatile bool *abort_flag;
+    esp_err_t receive_error;
 } http_request_context_t;
 
 static inline bool abort_requested(const http_request_context_t *ctx)
@@ -171,22 +172,6 @@ static bool utf8_body_is_valid(const char *body)
     return true;
 }
 
-static esp_err_t response_buffer_init(response_buffer_t *buffer)
-{
-    if (!buffer) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    buffer->data = calloc(1, CLAW_LLM_HTTP_RB_INITIAL_CAP);
-    if (!buffer->data) {
-        return ESP_ERR_NO_MEM;
-    }
-
-    buffer->cap = CLAW_LLM_HTTP_RB_INITIAL_CAP;
-    buffer->len = 0;
-    return ESP_OK;
-}
-
 static esp_err_t response_buffer_append(response_buffer_t *buffer, const char *data, size_t len)
 {
     char *grown;
@@ -196,7 +181,10 @@ static esp_err_t response_buffer_append(response_buffer_t *buffer, const char *d
         return ESP_ERR_INVALID_ARG;
     }
 
-    cap = buffer->cap;
+    if (!len) {
+        return ESP_OK;
+    }
+    cap = buffer->cap ? buffer->cap : CLAW_LLM_HTTP_RB_INITIAL_CAP;
     while (buffer->len + len + 1 > cap) {
         cap *= 2;
     }
@@ -235,7 +223,11 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
     }
 
     if (evt->event_id == HTTP_EVENT_ON_DATA) {
-        return response_buffer_append(ctx->buffer, (const char *)evt->data, evt->data_len);
+        /* esp_http_client does not propagate data callback errors to perform(). */
+        if (ctx->receive_error == ESP_OK && evt->data_len > 0) {
+            ctx->receive_error = response_buffer_append(ctx->buffer, evt->data, evt->data_len);
+        }
+        return ctx->receive_error;
     }
 
     return ESP_OK;
@@ -346,13 +338,6 @@ esp_err_t claw_llm_http_post_json(const claw_llm_http_json_request_t *request,
         body_to_send = sanitized_body;
     }
 
-    err = response_buffer_init(&buffer);
-    if (err != ESP_OK) {
-        *out_error_message = dup_printf("Out of memory allocating HTTP buffer");
-        ESP_LOGE(TAG, "OOM allocating HTTP response buffer");
-        goto cleanup;
-    }
-
     request_ctx.buffer = &buffer;
     request_ctx.abort_flag = request->abort_flag;
     config.url = request->url;
@@ -408,6 +393,11 @@ esp_err_t claw_llm_http_post_json(const claw_llm_http_json_request_t *request,
      * 避免把半截请求重复发出去。 */
     for (int attempt = 0; ; attempt++) {
         err = esp_http_client_perform(client);
+        if (request_ctx.receive_error != ESP_OK) {
+            err = request_ctx.receive_error;
+            *out_error_message = dup_printf("Out of memory buffering HTTP response");
+            goto cleanup;
+        }
         if (err == ESP_OK) {
             break;
         }
@@ -459,6 +449,14 @@ esp_err_t claw_llm_http_post_json(const claw_llm_http_json_request_t *request,
         goto cleanup;
     }
 
+    if (!buffer.data) {
+        buffer.data = strdup("");
+        if (!buffer.data) {
+            err = ESP_ERR_NO_MEM;
+            *out_error_message = dup_printf("Out of memory buffering HTTP response");
+            goto cleanup;
+        }
+    }
     out_response->status_code = status_code;
     out_response->body = buffer.data;
     if (s_response_observer && out_response->body) {

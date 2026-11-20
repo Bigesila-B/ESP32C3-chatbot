@@ -797,6 +797,7 @@ static esp_err_t anthropic_chat(void *backend_ctx,
     }
 
     err = build_chat_body(ctx, request, &post_data, out_error_message);
+    claw_llm_owned_inputs_clear(request->owned_inputs);
     if (err != ESP_OK) {
         return err;
     }
