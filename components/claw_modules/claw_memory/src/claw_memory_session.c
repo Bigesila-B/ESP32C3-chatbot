@@ -2432,6 +2432,66 @@ esp_err_t claw_memory_stage_note_callback(const claw_core_request_t *request,
     return ESP_OK;
 }
 
+/* 请求里只带最近几轮对话：完整历史仍存在 FATFS 里，网页回放不受影响。
+ * C3 没有 PSRAM，历史越长请求体越大，握手阶段的临时分配越容易失败。
+ * 裁剪必须落在 user 消息边界上，否则会把 assistant tool_calls 和后面的
+ * tool 结果拆开，服务端会直接报参数错误。 */
+#define CLAW_MEMORY_REQUEST_KEEP_USER_TURNS 3
+
+static char *session_history_trim_to_recent_turns(const char *json)
+{
+    cJSON *arr = NULL;
+    cJSON *trimmed = NULL;
+    char *text = NULL;
+    int total = 0;
+    int start = -1;
+    int users = 0;
+
+    if (!json) {
+        return NULL;
+    }
+    arr = cJSON_Parse(json);
+    if (!arr || !cJSON_IsArray(arr)) {
+        cJSON_Delete(arr);
+        return NULL;
+    }
+
+    total = cJSON_GetArraySize(arr);
+    for (int i = total - 1; i >= 0; i--) {
+        cJSON *item = cJSON_GetArrayItem(arr, i);
+        cJSON *role = cJSON_GetObjectItemCaseSensitive(item, "role");
+
+        if (cJSON_IsString(role) && strcmp(role->valuestring, "user") == 0) {
+            users++;
+            start = i;
+            if (users >= CLAW_MEMORY_REQUEST_KEEP_USER_TURNS) {
+                break;
+            }
+        }
+    }
+
+    if (start <= 0) {
+        cJSON_Delete(arr);
+        return NULL;
+    }
+
+    trimmed = cJSON_CreateArray();
+    if (!trimmed) {
+        cJSON_Delete(arr);
+        return NULL;
+    }
+    for (int i = start; i < total; i++) {
+        cJSON *copy = cJSON_Duplicate(cJSON_GetArrayItem(arr, i), 1);
+        if (copy) {
+            cJSON_AddItemToArray(trimmed, copy);
+        }
+    }
+    text = cJSON_PrintUnformatted(trimmed);
+    cJSON_Delete(trimmed);
+    cJSON_Delete(arr);
+    return text;
+}
+
 static esp_err_t claw_memory_session_history_collect(const claw_core_request_t *request,
                                                      claw_core_context_t *out_context,
                                                      void *user_ctx)
@@ -2456,6 +2516,18 @@ static esp_err_t claw_memory_session_history_collect(const claw_core_request_t *
     if (!content || !content[0] || strcmp(content, "[]") == 0) {
         free(content);
         return ESP_ERR_NOT_FOUND;
+    }
+
+    /* 请求只带最近几轮；完整历史仍在 FATFS 里，网页回放和压缩不受影响 */
+    {
+        char *trimmed = session_history_trim_to_recent_turns(content);
+
+        if (trimmed) {
+            ESP_LOGI(TAG, "history trimmed for request: %u -> %u bytes",
+                     (unsigned)strlen(content), (unsigned)strlen(trimmed));
+            free(content);
+            content = trimmed;
+        }
     }
 
     /* 把上一次压缩生成的摘要插到历史最前面，

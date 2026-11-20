@@ -15,6 +15,8 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "llm_http";
 
@@ -400,7 +402,36 @@ esp_err_t claw_llm_http_post_json(const claw_llm_http_json_request_t *request,
              (unsigned)strlen(body_to_send),
              (unsigned)esp_get_free_heap_size(),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
-    err = esp_http_client_perform(client);
+    /* C3 上 TLS 握手偶尔会在内存边缘失败（ESP_ERR_HTTP_CONNECT /
+     * ESP_ERR_HTTP_WRITE_DATA）。完全没收到响应时重建客户端重试一次：
+     * 上一次失败的缓冲已经释放，第二次通常就能成功；已经收到数据则不重试，
+     * 避免把半截请求重复发出去。 */
+    for (int attempt = 0; ; attempt++) {
+        err = esp_http_client_perform(client);
+        if (err == ESP_OK) {
+            break;
+        }
+        if (attempt == 0 && !abort_requested(&request_ctx) && buffer.len == 0) {
+            ESP_LOGW(TAG, "HTTP perform failed (%s), retrying once", esp_err_to_name(err));
+            esp_http_client_cleanup(client);
+            vTaskDelay(pdMS_TO_TICKS(300));
+            client = esp_http_client_init(&config);
+            if (!client) {
+                break;
+            }
+            esp_http_client_set_method(client, HTTP_METHOD_POST);
+            esp_http_client_set_header(client, "Content-Type", "application/json");
+            if (auth_header_value) {
+                esp_http_client_set_header(client,
+                                           auth_header_name(request->auth_type),
+                                           auth_header_value);
+            }
+            esp_http_client_set_post_field(client, body_to_send, (int)strlen(body_to_send));
+            continue;
+        }
+        break;
+    }
+
     if (err != ESP_OK) {
         if (abort_requested(&request_ctx)) {
             *out_error_message = dup_printf("HTTP request aborted by caller");

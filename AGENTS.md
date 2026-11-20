@@ -161,10 +161,13 @@ the id from the filename instead of reimplementing the hash.
   TEXT_ONLY build; 19 are in use. Every new endpoint must be counted;
   registration failure aborts at boot through `ESP_ERROR_CHECK`.
 - **TLS receive buffer**: `CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=8192` in the board
-  defaults is a deliberate floor, not an oversight. The mbedtls default of
-  16 KB made handshakes fail with `Dynamic Impl: alloc(...) failed` once the
-  request body, persona and tool list were live at the same time. 4 KB is too
-  small — the certificate chain no longer fits and every HTTPS call fails.
+  defaults is a deliberate floor, not an oversight. 6 KB already fails the
+  handshake outright (the certificate chain no longer fits); 16 KB leaves no
+  room for the request peak. Do not "optimise" it downwards.
+- **Request history is trimmed to the last 3 user turns** in
+  `claw_memory_session_history_collect()`. The cut must stay on a `user`
+  boundary: splitting an `assistant tool_calls` message from its `tool` results
+  makes the upstream API reject the request. The full history stays on FATFS.
 - **Do not copy the request body**: `claw_llm_http_transport.c` validates UTF-8
   in place and only allocates a sanitized copy when the body is actually
   invalid. The previous unconditional `calloc(len + 1)` doubled an 8 KB request

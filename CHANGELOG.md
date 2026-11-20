@@ -28,6 +28,8 @@
 
 * **对话写请求失败（`ESP_ERR_HTTP_WRITE_DATA`）**：请求体在发送前会被整份复制一遍做 UTF-8 清洗，8 KB 的请求体因此多占 8 KB 峰值；同时 HTTP 收发缓冲各 4 KB、TLS 发送记录 4 KB（对应一条 4.4 KB 的临时缓冲）。三者叠加后，C3 在握手后的写阶段反复 `Dynamic Impl: alloc(4437 bytes) failed`，重试到超时。改为：合法 UTF-8 直接复用原缓冲、不再复制；HTTP 缓冲降到 2 KB；`CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN` 降到 2 KB。实测同一句对话连续 4 次全部成功（5–7 s），请求时堆 48 KB、最大块 32 KB，无分配失败。
 * **搜索链路降峰值**：Tavily/Brave 响应缓冲 12 KB→8 KB、上限 16 KB→12 KB、HTTP 读缓冲 4 KB→2 KB、摘要 200→140 字节。工具轮次实测第一次请求 49 KB 堆、第二次（带工具结果）44 KB 堆，可完成；但连续压测仍有约 1/3 概率在第二次握手时报 `ESP_ERR_HTTP_CONNECT`，待进一步排查。
+* **请求只带最近 3 轮历史**：`claw_memory_session_history_collect()` 增加裁剪，裁剪点落在 user 消息边界，避免把 `assistant tool_calls` 和后续 `tool` 结果拆开。完整历史仍保存在 FATFS，网页回放不受影响。实测历史从 7.1 KB 降到 2.7 KB，但请求体仍约 10 KB——大头是 4.9 KB 系统提示和 1.5 KB 工具清单。
+* **LLM 请求增加一次重试**：仅在「一个字节都没收到」且调用方未取消时重建客户端重试一次；已收到部分响应则不重试，避免重复发送。缓解 C3 上握手阶段的偶发内存失败。
 
 * **对话并发保护**：`/api/chat` 增加单实例占用标记，`HTTP_CHAT_REPLY_MS` 由 90 s 提到 130 s（必须大于模型请求的 120 s 超时）。此前 HTTP 先超时返回、模型请求仍在后台跑，连续的请求会叠在一起把堆吃光，随后连网页和 QQ 通道都握手失败，只能重启恢复。
 * `CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN` 从 16384 降到 8192：实测单次对话握手阶段会出现 `Dynamic Impl: alloc(5193 bytes) failed`，结束后堆又回到 70 KB，属于峰值不足。8 KB 能收下当前服务商的证书链，4 KB 会握不上，已在板级默认值里注明这是下限。
