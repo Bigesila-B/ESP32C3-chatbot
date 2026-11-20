@@ -18,10 +18,7 @@
 
 static const char *TAG = "cap_web_search";
 
-/* C3 没有 PSRAM：搜索响应是整块收进堆再解析的，缓冲区按实测响应体积取 12 KB，
- * 结果条数也从 5 降到 3，避免与 LLM 的 TLS 会话叠加时把堆挤爆。 */
-#define CAP_WEB_SEARCH_BUF_SIZE     (8 * 1024)
-/* 响应再长也不能无限 realloc：C3 无 PSRAM，此时 LLM 的 TLS 会话可能仍占着堆 */
+/* Maximum wire response including the terminator. */
 #define CAP_WEB_SEARCH_BUF_MAX      (12 * 1024)
 #define CAP_WEB_SEARCH_RESULT_COUNT 3
 
@@ -32,10 +29,11 @@ typedef enum {
 } cap_web_search_provider_t;
 
 typedef struct {
-    char *data;
+    char *prefix;       /* Borrowed caller output until the JSON has been parsed. */
+    size_t prefix_limit; /* Payload bytes, excluding its terminator. */
+    char *tail;
     size_t len;
-    size_t cap;
-    bool overflow;
+    esp_err_t error;
 } cap_web_search_buf_t;
 
 typedef struct {
@@ -59,43 +57,61 @@ static void cap_web_search_refresh_provider(void)
 
 static esp_err_t cap_web_search_http_event_handler(esp_http_client_event_t *event)
 {
-    cap_web_search_buf_t *buf = NULL;
-    size_t append_len;
-
-    if (!event) {
+    if (!event || event->event_id != HTTP_EVENT_ON_DATA || event->data_len <= 0) {
         return ESP_OK;
     }
-
-    buf = (cap_web_search_buf_t *)event->user_data;
-    if (event->event_id != HTTP_EVENT_ON_DATA || !buf || !buf->data || event->data_len <= 0) {
-        return ESP_OK;
+    cap_web_search_buf_t *buf = event->user_data;
+    const char *data = event->data;
+    size_t count = (size_t)event->data_len;
+    if (buf->error != ESP_OK) {
+        return buf->error;
     }
-
-    append_len = (size_t)event->data_len;
-    if (buf->overflow) {
-        return ESP_OK;
+    if (count > CAP_WEB_SEARCH_BUF_MAX - 1 - buf->len) {
+        buf->error = ESP_ERR_INVALID_SIZE;
+        return buf->error;
     }
-    if (buf->len + append_len + 1 > buf->cap) {
-        size_t new_cap = buf->cap * 2 < CAP_WEB_SEARCH_BUF_MAX
-                             ? buf->cap * 2 : CAP_WEB_SEARCH_BUF_MAX;
-        char *new_data = NULL;
-
-        if (buf->len + append_len + 1 > new_cap) {
-            /* 超出上限就截断并标记，execute 会给出明确错误，不让堆继续膨胀 */
-            append_len = new_cap - buf->len - 1;
-            buf->overflow = true;
+    if (buf->len < buf->prefix_limit) {
+        size_t available = buf->prefix_limit - buf->len;
+        size_t n = count < available ? count : available;
+        memcpy(buf->prefix + buf->len, data, n);
+        buf->len += n;
+        buf->prefix[buf->len] = '\0';
+        data += n;
+        count -= n;
+    }
+    if (count) {
+        if (!buf->tail) {
+            buf->tail = malloc(CAP_WEB_SEARCH_BUF_MAX - 1 - buf->prefix_limit);
+            if (!buf->tail) {
+                buf->error = ESP_ERR_NO_MEM;
+                return buf->error;
+            }
         }
-        new_data = realloc(buf->data, new_cap);
-        if (!new_data) {
+        memcpy(buf->tail + (buf->len - buf->prefix_limit), data, count);
+        buf->len += count;
+    }
+    return ESP_OK;
+}
+
+/* Both providers have closed their TLS client by the time this is called. */
+static esp_err_t cap_web_search_parse_body(cap_web_search_buf_t *buf, cJSON **root)
+{
+    if (!buf->tail) {
+        *root = cJSON_Parse(buf->prefix);
+    } else {
+        char *joined = malloc(buf->len + 1);
+        if (!joined) {
             return ESP_ERR_NO_MEM;
         }
-        buf->data = new_data;
-        buf->cap = new_cap;
+        memcpy(joined, buf->prefix, buf->prefix_limit);
+        memcpy(joined + buf->prefix_limit, buf->tail, buf->len - buf->prefix_limit);
+        joined[buf->len] = '\0';
+        free(buf->tail);
+        buf->tail = NULL;
+        *root = cJSON_Parse(joined);
+        free(joined);
     }
-    memcpy(buf->data + buf->len, event->data, append_len);
-    buf->len += append_len;
-    buf->data[buf->len] = '\0';
-    return ESP_OK;
+    return *root ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }
 
 static size_t cap_web_search_url_encode(const char *src, char *dst, size_t dst_size)
@@ -430,13 +446,9 @@ static esp_err_t cap_web_search_execute(const char *input_json,
         return ESP_ERR_INVALID_ARG;
     }
 
-    buf.data = calloc(1, CAP_WEB_SEARCH_BUF_SIZE);
-    if (!buf.data) {
-        cJSON_Delete(input);
-        snprintf(output, output_size, "Error: out of memory");
-        return ESP_ERR_NO_MEM;
-    }
-    buf.cap = CAP_WEB_SEARCH_BUF_SIZE;
+    output[0] = '\0';
+    buf.prefix = output;
+    buf.prefix_limit = (output_size < CAP_WEB_SEARCH_BUF_MAX ? output_size : CAP_WEB_SEARCH_BUF_MAX) - 1;
 
     if (s_search.provider == CAP_WEB_SEARCH_PROVIDER_TAVILY) {
         err = cap_web_search_tavily_direct(query->valuestring, &buf);
@@ -454,23 +466,20 @@ static esp_err_t cap_web_search_execute(const char *input_json,
     }
 
     cJSON_Delete(input);
+    if (buf.error != ESP_OK) {
+        err = buf.error;
+    }
+    if (err == ESP_OK) {
+        err = cap_web_search_parse_body(&buf, &root);
+    }
+    free(buf.tail);
     if (err != ESP_OK) {
-        free(buf.data);
-        snprintf(output, output_size, "Error: search request failed (%s)", esp_err_to_name(err));
+        if (err == ESP_ERR_INVALID_SIZE) {
+            snprintf(output, output_size, "Error: search response exceeds %d bytes", CAP_WEB_SEARCH_BUF_MAX);
+        } else {
+            snprintf(output, output_size, "Error: search request failed (%s)", esp_err_to_name(err));
+        }
         return err;
-    }
-    if (buf.overflow) {
-        free(buf.data);
-        snprintf(output, output_size, "Error: search response exceeds %d bytes",
-                 CAP_WEB_SEARCH_BUF_MAX);
-        return ESP_ERR_INVALID_SIZE;
-    }
-
-    root = cJSON_Parse(buf.data);
-    free(buf.data);
-    if (!root) {
-        snprintf(output, output_size, "Error: failed to parse search results");
-        return ESP_FAIL;
     }
 
     if (s_search.provider == CAP_WEB_SEARCH_PROVIDER_TAVILY) {

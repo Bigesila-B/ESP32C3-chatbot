@@ -5,6 +5,7 @@
  */
 #include "llm/backends/claw_llm_backend_openai_compatible.h"
 
+#include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -206,6 +207,49 @@ static esp_err_t parse_chat_response(const char *body,
     return ESP_OK;
 }
 
+/* cJSON's growing printer can request twice the final body size. Size its
+ * unformatted output first so a 12 KB body never needs a 24 KB free block. */
+static size_t quoted_json_size(const char *str)
+{
+    size_t bytes = 2;
+    for (const unsigned char *p = (const unsigned char *)str; p && *p; ++p) {
+        switch (*p) {
+        case '"': case '\\': case '\b': case '\t': case '\n': case '\f': case '\r':
+            bytes += 2;
+            break;
+        default:
+            bytes += *p < 0x20 ? 6 : 1;
+        }
+    }
+    return bytes;
+}
+
+static size_t compact_json_size(const cJSON *item)
+{
+    if (cJSON_IsArray(item) || cJSON_IsObject(item)) {
+        size_t bytes = 2;
+        const cJSON *child;
+        cJSON_ArrayForEach(child, item) {
+            if (child != item->child) {
+                bytes++; /* comma */
+            }
+            if (cJSON_IsObject(item)) {
+                bytes += quoted_json_size(child->string) + 1;
+            }
+            bytes += compact_json_size(child);
+        }
+        return bytes;
+    }
+    if (cJSON_IsString(item)) {
+        return quoted_json_size(item->valuestring);
+    }
+    if (cJSON_IsRaw(item)) {
+        return item->valuestring ? strlen(item->valuestring) : 0;
+    }
+    /* cJSON uses a 26-byte local buffer to print a number. */
+    return cJSON_IsNumber(item) ? 26 : 5;
+}
+
 static esp_err_t build_chat_body(const openai_compatible_backend_ctx_t *ctx,
                                  const claw_llm_model_profile_t *profile,
                                  const claw_llm_chat_request_t *request,
@@ -252,7 +296,9 @@ static esp_err_t build_chat_body(const openai_compatible_backend_ctx_t *ctx,
         }
         cJSON_AddItemToObjectCS(body, "tools", tools);
     }
-    *out_post_data = cJSON_PrintUnformatted(body);
+    size_t wire_size = compact_json_size(body);
+    /* cJSON asks for a few spare bytes while printing closing delimiters. */
+    *out_post_data = wire_size <= INT_MAX - 5 ? cJSON_PrintBuffered(body, (int)wire_size + 5, false) : NULL;
     if (*out_post_data) {
         err = ESP_OK;
     }
